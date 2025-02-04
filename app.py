@@ -16,9 +16,7 @@ def load_data():
     Đảm bảo rằng bạn đã cấu hình key "gcp_service_account" và "sheet" trong file secrets.
     """
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(
-        st.secrets["gcp_service_account"], scope
-    )
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
     client = gspread.authorize(credentials)
     sheet_url = st.secrets["sheet"]["url"]
     spreadsheet = client.open_by_url(sheet_url)
@@ -27,8 +25,9 @@ def load_data():
     df = df.dropna(how="all")
     return df
 
-# Load dữ liệu (không hiển thị bảng dữ liệu gốc)
+# Load dữ liệu từ Google Sheet
 data = load_data()
+st.write("### Dữ liệu từ Google Sheet (5 dòng đầu tiên)", data.head())
 
 ##############################################
 # PHẦN 2: BỘ LỌC DỮ LIỆU (Sidebar)
@@ -37,31 +36,42 @@ data = load_data()
 st.sidebar.header("Bộ lọc dữ liệu")
 
 # --- Lọc theo ngành hàng ---
+# Lấy danh sách các ngành hàng từ cột "Category description"
 categories = data["Category description"].dropna().unique().tolist()
-# Không đặt default, nghĩa là nếu không chọn gì, ta sử dụng tất cả các giá trị
+# Hiển thị widget multiselect với default rỗng
 selected_categories = st.sidebar.multiselect(
     "Chọn ngành hàng:",
     options=categories,
     default=[]
 )
+# Nếu người dùng không chọn ngành hàng nào, ta sử dụng tất cả các ngành hàng
 if not selected_categories:
     selected_categories_filter = categories
 else:
     selected_categories_filter = selected_categories
 
 # --- Lọc theo sản phẩm ---
-data_by_category = data[data["Category description"].isin(selected_categories_filter)]
+# Nếu chưa có lựa chọn ngành hàng, sử dụng dữ liệu gốc để lấy danh sách sản phẩm
+if selected_categories_filter:
+    data_by_category = data[data["Category description"].isin(selected_categories_filter)]
+else:
+    data_by_category = data
+
+# Lấy danh sách các sản phẩm (Spec description) thuộc các ngành hàng đã chọn
 specs_in_category = data_by_category["Spec description"].dropna().unique().tolist()
+# Widget multiselect cho sản phẩm với default rỗng
 selected_specs = st.sidebar.multiselect(
     "Chọn sản phẩm:",
     options=specs_in_category,
     default=[]
 )
+# Nếu người dùng không chọn sản phẩm nào, sử dụng tất cả các sản phẩm từ danh sách hiện có
 if not selected_specs:
     selected_specs_filter = specs_in_category
 else:
     selected_specs_filter = selected_specs
 
+# Lọc dữ liệu cuối cùng dựa trên lựa chọn ngành hàng và sản phẩm
 filtered_data = data[
     data["Category description"].isin(selected_categories_filter) &
     data["Spec description"].isin(selected_specs_filter)
@@ -71,6 +81,7 @@ filtered_data = data[
 # PHẦN 3: XỬ LÝ DỮ LIỆU CHO BIỂU ĐỒ
 ##############################################
 
+# Hàm chuyển đổi Sample Name sang giá trị thời gian tính theo tháng.
 def parse_sample_name(sample_name):
     """
     Chuyển đổi chuỗi Sample Name theo định dạng:
@@ -98,22 +109,27 @@ if "Sample Name" not in filtered_data.columns:
     st.error("Không tìm thấy cột 'Sample Name' trong dữ liệu.")
     st.stop()
 
+# Tạo cột mới "Time_Months" làm trục x cho biểu đồ
 filtered_data["Time_Months"] = filtered_data["Sample Name"].apply(parse_sample_name)
 
-# (Tùy chọn) Tạo cột "Lot_ID" từ 6 ký tự đầu của "Lot number" nếu tồn tại
+# (Tùy chọn) Tạo cột "Lot_ID" chỉ lấy 6 ký tự đầu của "Lot number" để nhận diện mẫu
 if "Lot number" in filtered_data.columns:
     filtered_data["Lot_ID"] = filtered_data["Lot number"].astype(str).str[:6]
 else:
     st.warning("Không tìm thấy cột 'Lot number' trong dữ liệu.")
 
+# Kiểm tra cột "Test" để phân chia dữ liệu
 if "Test" not in filtered_data.columns:
     st.error("Không tìm thấy cột 'Test' trong dữ liệu.")
     st.stop()
 
 # Tách dữ liệu theo chỉ tiêu:
+# - Dữ liệu cảm quan: các dòng có giá trị trong cột Test bắt đầu bằng "CQ"
+# - Dữ liệu hóa lý: các dòng có giá trị trong cột Test bắt đầu bằng "HL"
 sensory_data = filtered_data[filtered_data["Test"].astype(str).str.startswith("CQ")].copy()
 chemical_data = filtered_data[filtered_data["Test"].astype(str).str.startswith("HL")].copy()
 
+# Chuyển đổi cột "Actual result" sang kiểu số
 for df in [sensory_data, chemical_data]:
     if "Actual result" in df.columns:
         df["Actual result"] = pd.to_numeric(df["Actual result"], errors="coerce")
@@ -121,7 +137,7 @@ for df in [sensory_data, chemical_data]:
         st.error("Không tìm thấy cột 'Actual result' trong dữ liệu.")
         st.stop()
 
-# Nhóm dữ liệu theo "Test description" và "Time_Months" để tính trung bình kết quả
+# Nhóm dữ liệu theo "Test description" và "Time_Months", tính trung bình của "Actual result"
 sensory_grouped = sensory_data.groupby(["Test description", "Time_Months"], as_index=False).agg({"Actual result": "mean"})
 chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as_index=False).agg({"Actual result": "mean"})
 
@@ -129,100 +145,32 @@ chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as
 # PHẦN 4: VẼ BIỂU ĐỒ VỚI PLOTLY
 ##############################################
 
-st.markdown("## Biểu đồ xu hướng")
-# Cài đặt template cho biểu đồ đẹp hơn
-chart_template = "plotly_white"
+st.write("## Biểu đồ xu hướng")
 
-# Biểu đồ xu hướng CẢM QUAN
+# Biểu đồ xu hướng cảm quan
 if not sensory_grouped.empty:
     fig_sensory = px.line(
         sensory_grouped,
         x="Time_Months",
         y="Actual result",
         color="Test description",
-        markers=True,
-        template=chart_template,
-        title="Biểu đồ xu hướng CẢM QUAN"
-    )
-    fig_sensory.update_layout(
-        xaxis_title="Thời gian (tháng)",
-        yaxis_title="Kết quả Actual",
-        legend_title="Chỉ tiêu",
-        hovermode="x unified"
+        title="Biểu đồ xu hướng CẢM QUAN",
+        labels={"Time_Months": "Thời gian (tháng)", "Actual result": "Kết quả Actual"}
     )
     st.plotly_chart(fig_sensory, use_container_width=True)
 else:
     st.info("Không có dữ liệu cảm quan để hiển thị biểu đồ.")
 
-# Biểu đồ xu hướng HÓA LÝ
+# Biểu đồ xu hướng hóa lý
 if not chemical_grouped.empty:
     fig_chemical = px.line(
         chemical_grouped,
         x="Time_Months",
         y="Actual result",
         color="Test description",
-        markers=True,
-        template=chart_template,
-        title="Biểu đồ xu hướng HÓA LÝ"
-    )
-    fig_chemical.update_layout(
-        xaxis_title="Thời gian (tháng)",
-        yaxis_title="Kết quả Actual",
-        legend_title="Chỉ tiêu",
-        hovermode="x unified"
+        title="Biểu đồ xu hướng HÓA LÝ",
+        labels={"Time_Months": "Thời gian (tháng)", "Actual result": "Kết quả Actual"}
     )
     st.plotly_chart(fig_chemical, use_container_width=True)
 else:
     st.info("Không có dữ liệu hóa lý để hiển thị biểu đồ.")
-
-##############################################
-# PHẦN 5: BIỂU ĐỒ THỐNG KÊ BỔ SUNG (Insight)
-##############################################
-
-st.markdown("## Phân tích thống kê thêm")
-
-# 1. Box Plot cho phân bố kết quả kiểm theo Test description
-if not filtered_data.empty and "Test description" in filtered_data.columns and "Actual result" in filtered_data.columns:
-    fig_box = px.box(
-        filtered_data,
-        x="Test description",
-        y="Actual result",
-        color="Test description",
-        template=chart_template,
-        title="Phân bố kết quả kiểm theo chỉ tiêu"
-    )
-    fig_box.update_layout(xaxis_title="Chỉ tiêu", yaxis_title="Kết quả Actual")
-    st.plotly_chart(fig_box, use_container_width=True)
-else:
-    st.info("Không đủ dữ liệu để vẽ Box Plot.")
-
-# 2. Histogram cho phân bố tổng thể của kết quả kiểm
-if not filtered_data.empty and "Actual result" in filtered_data.columns:
-    fig_hist = px.histogram(
-        filtered_data,
-        x="Actual result",
-        color="Test description",
-        barmode="overlay",
-        template=chart_template,
-        title="Phân bố tổng thể kết quả kiểm"
-    )
-    fig_hist.update_layout(xaxis_title="Kết quả Actual", yaxis_title="Số lượng mẫu")
-    st.plotly_chart(fig_hist, use_container_width=True)
-else:
-    st.info("Không đủ dữ liệu để vẽ Histogram.")
-
-# 3. Scatter Plot (với trendline) cho mối quan hệ giữa thời gian lưu và kết quả kiểm
-if not filtered_data.empty and "Time_Months" in filtered_data.columns and "Actual result" in filtered_data.columns:
-    fig_scatter = px.scatter(
-        filtered_data,
-        x="Time_Months",
-        y="Actual result",
-        color="Test description",
-        template=chart_template,
-        title="Mối quan hệ giữa thời gian lưu và kết quả kiểm (Scatter Plot)",
-        trendline="ols"
-    )
-    fig_scatter.update_layout(xaxis_title="Thời gian (tháng)", yaxis_title="Kết quả Actual")
-    st.plotly_chart(fig_scatter, use_container_width=True)
-else:
-    st.info("Không đủ dữ liệu để vẽ Scatter Plot.")
