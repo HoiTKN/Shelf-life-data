@@ -35,32 +35,46 @@ st.write("### Dữ liệu từ Google Sheet (5 dòng đầu tiên)", data.head()
 
 st.sidebar.header("Bộ lọc dữ liệu")
 
-# --- Bước 1: Lọc theo ngành hàng ---
+# --- Lọc theo ngành hàng ---
 # Lấy danh sách các ngành hàng từ cột "Category description"
 categories = data["Category description"].dropna().unique().tolist()
-# Mặc định chỉ chọn "Fish Sauces" (điều chỉnh nếu dữ liệu của bạn có tên khác)
+# Hiển thị widget multiselect với default rỗng
 selected_categories = st.sidebar.multiselect(
     "Chọn ngành hàng:",
     options=categories,
-    default=["Fish Sauces"]
+    default=[]
 )
+# Nếu người dùng không chọn ngành hàng nào, ta sử dụng tất cả các ngành hàng
+if not selected_categories:
+    selected_categories_filter = categories
+else:
+    selected_categories_filter = selected_categories
 
-# --- Bước 2: Lọc theo sản phẩm ---
-# Lấy dữ liệu chỉ chứa các dòng thuộc ngành hàng đã chọn
-data_by_category = data[data["Category description"].isin(selected_categories)]
-# Lấy danh sách các sản phẩm (Spec description) thuộc ngành hàng đã chọn
+# --- Lọc theo sản phẩm ---
+# Nếu chưa có lựa chọn ngành hàng, sử dụng dữ liệu gốc để lấy danh sách sản phẩm
+if selected_categories_filter:
+    data_by_category = data[data["Category description"].isin(selected_categories_filter)]
+else:
+    data_by_category = data
+
+# Lấy danh sách các sản phẩm (Spec description) thuộc các ngành hàng đã chọn
 specs_in_category = data_by_category["Spec description"].dropna().unique().tolist()
-# Mặc định chỉ chọn "Nước mắm Nam ngư" (điều chỉnh nếu dữ liệu của bạn có tên khác)
+# Widget multiselect cho sản phẩm với default rỗng
 selected_specs = st.sidebar.multiselect(
     "Chọn sản phẩm:",
     options=specs_in_category,
-    default=["Nước mắm Nam ngư"]
+    default=[]
 )
+# Nếu người dùng không chọn sản phẩm nào, sử dụng tất cả các sản phẩm từ danh sách hiện có
+if not selected_specs:
+    selected_specs_filter = specs_in_category
+else:
+    selected_specs_filter = selected_specs
 
 # Lọc dữ liệu cuối cùng dựa trên lựa chọn ngành hàng và sản phẩm
 filtered_data = data[
-    data["Category description"].isin(selected_categories) &
-    data["Spec description"].isin(selected_specs)
+    data["Category description"].isin(selected_categories_filter) &
+    data["Spec description"].isin(selected_specs_filter)
 ].copy()
 
 ##############################################
@@ -71,8 +85,8 @@ filtered_data = data[
 def parse_sample_name(sample_name):
     """
     Chuyển đổi chuỗi Sample Name theo định dạng:
-      - "01D-RO": số ngày, chuyển thành tháng = số ngày/30
-      - "02W-RO": số tuần, chuyển thành tháng = số tuần/4.345
+      - "01D-RO": số ngày, chuyển thành tháng = số ngày / 30
+      - "02W-RO": số tuần, chuyển thành tháng = số tuần / 4.345
       - "01M-RO": số tháng, giữ nguyên số đó
     """
     try:
@@ -88,7 +102,7 @@ def parse_sample_name(sample_name):
             return num
         else:
             return None
-    except Exception as e:
+    except Exception:
         return None
 
 if "Sample Name" not in filtered_data.columns:
