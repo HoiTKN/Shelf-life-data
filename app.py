@@ -44,14 +44,36 @@ if "Category description" not in data.columns or "Spec description" not in data.
     st.stop()
 
 # Lấy danh sách các giá trị duy nhất cho bộ lọc
+# Giả sử dữ liệu đã được load vào biến data như ở phần đầu của app.py
+# Ví dụ:
+# data = load_data()
+
+# Lấy danh sách các giá trị duy nhất cho cột "Category description"
 categories = data["Category description"].dropna().unique().tolist()
-specs = data["Spec description"].dropna().unique().tolist()
-
 st.sidebar.header("Bộ lọc dữ liệu")
-selected_categories = st.sidebar.multiselect("Chọn ngành hàng:", options=categories, default=categories)
-selected_specs = st.sidebar.multiselect("Chọn sản phẩm:", options=specs, default=specs)
 
-# Lọc dữ liệu theo lựa chọn của người dùng
+# --- Bước 1: Chọn ngành hàng ---
+# Mặc định chỉ chọn 1 ngành hàng là "Fish Sauces" (điều chỉnh nếu cần)
+selected_categories = st.sidebar.multiselect(
+    "Chọn ngành hàng:",
+    options=categories,
+    default=["Fish Sauces"]  # Giá trị mặc định: chỉ có "Fish Sauces"
+)
+
+# --- Bước 2: Chọn sản phẩm ---
+# Lấy dữ liệu chỉ chứa các dòng có ngành hàng đã chọn
+data_by_category = data[data["Category description"].isin(selected_categories)]
+# Lấy danh sách sản phẩm (Spec description) dựa trên các dòng đã lọc theo ngành hàng
+specs_in_category = data_by_category["Spec description"].dropna().unique().tolist()
+
+# Mặc định chỉ chọn 1 sản phẩm là "Nước mắm Nam ngư"
+selected_specs = st.sidebar.multiselect(
+    "Chọn sản phẩm:",
+    options=specs_in_category,
+    default=["Nước mắm Nam ngư"]  # Giá trị mặc định
+)
+
+# Lọc dữ liệu dựa trên lựa chọn của người dùng
 filtered_data = data[
     data["Category description"].isin(selected_categories) &
     data["Spec description"].isin(selected_specs)
