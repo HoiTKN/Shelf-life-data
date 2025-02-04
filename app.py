@@ -14,13 +14,30 @@ def load_data():
     """
     Hàm load dữ liệu từ Google Sheet sử dụng thông tin trong st.secrets.
     Đảm bảo rằng bạn đã cấu hình key "gcp_service_account" và "sheet" trong file secrets.
+    Nếu không có, hiển thị thông báo lỗi hướng dẫn.
     """
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(
-        st.secrets["gcp_service_account"], scope
-    )
+    # Lấy thông tin credentials từ st.secrets
+    try:
+        creds_dict = st.secrets["gcp_service_account"]
+    except KeyError:
+        st.error(
+            "Thiếu key 'gcp_service_account' trong st.secrets. "
+            "Vui lòng thêm nó vào file .streamlit/secrets.toml hoặc trong cài đặt app trên Streamlit Cloud.\n\n"
+            "Xem thêm: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management"
+        )
+        return pd.DataFrame()  # Trả về DataFrame rỗng nếu không có credentials
+
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(credentials)
-    sheet_url = st.secrets["sheet"]["url"]
+    
+    # Lấy URL của Google Sheet từ st.secrets
+    try:
+        sheet_url = st.secrets["sheet"]["url"]
+    except KeyError:
+        st.error("Thiếu key 'sheet' trong st.secrets. Vui lòng thêm nó.")
+        return pd.DataFrame()
+    
     spreadsheet = client.open_by_url(sheet_url)
     worksheet = spreadsheet.get_worksheet(0)
     df = get_as_dataframe(worksheet, evaluate_formulas=True, header=0)
@@ -29,6 +46,8 @@ def load_data():
 
 # Load dữ liệu (không hiển thị bảng dữ liệu gốc)
 data = load_data()
+if data.empty:
+    st.stop()  # Dừng ứng dụng nếu dữ liệu không tải được
 
 ##############################################
 # PHẦN 2: BỘ LỌC DỮ LIỆU (Sidebar)
@@ -38,7 +57,7 @@ st.sidebar.header("Bộ lọc dữ liệu")
 
 # --- Lọc theo ngành hàng ---
 categories = data["Category description"].dropna().unique().tolist()
-# Không đặt default, nghĩa là nếu không chọn gì, ta sử dụng tất cả các giá trị
+# Không đặt default, nếu không chọn thì dùng tất cả các giá trị
 selected_categories = st.sidebar.multiselect(
     "Chọn ngành hàng:",
     options=categories,
@@ -79,7 +98,7 @@ def parse_sample_name(sample_name):
       - "01M-RO": số tháng, giữ nguyên số đó
     """
     try:
-        part = sample_name.split('-')[0]  # Lấy phần trước dấu "-"
+        part = sample_name.split('-')[0]
         num_str = "".join(filter(str.isdigit, part))
         unit = "".join(filter(str.isalpha, part)).upper()
         num = float(num_str)
@@ -100,7 +119,6 @@ if "Sample Name" not in filtered_data.columns:
 
 filtered_data["Time_Months"] = filtered_data["Sample Name"].apply(parse_sample_name)
 
-# (Tùy chọn) Tạo cột "Lot_ID" từ 6 ký tự đầu của "Lot number" nếu tồn tại
 if "Lot number" in filtered_data.columns:
     filtered_data["Lot_ID"] = filtered_data["Lot number"].astype(str).str[:6]
 else:
@@ -110,7 +128,6 @@ if "Test" not in filtered_data.columns:
     st.error("Không tìm thấy cột 'Test' trong dữ liệu.")
     st.stop()
 
-# Tách dữ liệu theo chỉ tiêu:
 sensory_data = filtered_data[filtered_data["Test"].astype(str).str.startswith("CQ")].copy()
 chemical_data = filtered_data[filtered_data["Test"].astype(str).str.startswith("HL")].copy()
 
@@ -121,7 +138,6 @@ for df in [sensory_data, chemical_data]:
         st.error("Không tìm thấy cột 'Actual result' trong dữ liệu.")
         st.stop()
 
-# Nhóm dữ liệu theo "Test description" và "Time_Months" để tính trung bình kết quả
 sensory_grouped = sensory_data.groupby(["Test description", "Time_Months"], as_index=False).agg({"Actual result": "mean"})
 chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as_index=False).agg({"Actual result": "mean"})
 
@@ -130,10 +146,8 @@ chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as
 ##############################################
 
 st.markdown("## Biểu đồ xu hướng")
-# Cài đặt template cho biểu đồ đẹp hơn
 chart_template = "plotly_white"
 
-# Biểu đồ xu hướng CẢM QUAN
 if not sensory_grouped.empty:
     fig_sensory = px.line(
         sensory_grouped,
@@ -154,7 +168,6 @@ if not sensory_grouped.empty:
 else:
     st.info("Không có dữ liệu cảm quan để hiển thị biểu đồ.")
 
-# Biểu đồ xu hướng HÓA LÝ
 if not chemical_grouped.empty:
     fig_chemical = px.line(
         chemical_grouped,
@@ -181,7 +194,6 @@ else:
 
 st.markdown("## Phân tích thống kê thêm")
 
-# 1. Box Plot cho phân bố kết quả kiểm theo Test description
 if not filtered_data.empty and "Test description" in filtered_data.columns and "Actual result" in filtered_data.columns:
     fig_box = px.box(
         filtered_data,
@@ -196,7 +208,6 @@ if not filtered_data.empty and "Test description" in filtered_data.columns and "
 else:
     st.info("Không đủ dữ liệu để vẽ Box Plot.")
 
-# 2. Histogram cho phân bố tổng thể của kết quả kiểm
 if not filtered_data.empty and "Actual result" in filtered_data.columns:
     fig_hist = px.histogram(
         filtered_data,
@@ -211,7 +222,6 @@ if not filtered_data.empty and "Actual result" in filtered_data.columns:
 else:
     st.info("Không đủ dữ liệu để vẽ Histogram.")
 
-# 3. Scatter Plot (với trendline) cho mối quan hệ giữa thời gian lưu và kết quả kiểm
 if not filtered_data.empty and "Time_Months" in filtered_data.columns and "Actual result" in filtered_data.columns:
     fig_scatter = px.scatter(
         filtered_data,
