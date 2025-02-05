@@ -26,26 +26,45 @@ def update_google_sheet(data: pd.DataFrame):
     # Ở đây, bạn có thể dùng file JSON cục bộ nếu cần, hoặc tích hợp theo cách bạn đã làm trong app.py.
     # Giả sử bạn sử dụng file JSON cục bộ (nếu dùng GitHub Actions, bạn có thể lưu thông tin này dưới dạng Secrets).
     import os, json
-    # Ví dụ: Lấy thông tin từ biến môi trường GCP_SERVICE_ACCOUNT
-    creds_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+
+def update_google_sheet(data):
+    # Các scope cần thiết cho Google Sheet API
+    scope = [
+        "https://spreadsheets.google.com/feeds", 
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    # Lấy thông tin credentials từ biến môi trường
+    creds_json = os.environ.get("GCP_SERVICE_ACCOUNT")
     if not creds_json:
-        raise ValueError("Không tìm thấy biến môi trường GCP_SERVICE_ACCOUNT_JSON")
+        raise ValueError("Không tìm thấy biến môi trường GCP_SERVICE_ACCOUNT")
     creds_dict = json.loads(creds_json)
     
+    from oauth2client.service_account import ServiceAccountCredentials
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    
+    import gspread
     client = gspread.authorize(credentials)
     
-    # URL của Google Sheet cũng được cung cấp qua biến môi trường (hoặc secrets)
+    # Lấy URL Google Sheet từ biến môi trường
     sheet_url = os.environ.get("GOOGLE_SHEET_URL")
     if not sheet_url:
         raise ValueError("Không tìm thấy biến môi trường GOOGLE_SHEET_URL")
     
     spreadsheet = client.open_by_url(sheet_url)
-    # Chọn worksheet đầu tiên
     worksheet = spreadsheet.get_worksheet(0)
     
-    # Ghi dữ liệu mới lên Google Sheet (bạn có thể sử dụng set_with_dataframe)
+    from gspread_dataframe import set_with_dataframe
     set_with_dataframe(worksheet, data)
+    
+def load_source_data():
+    # Ví dụ: tạo dữ liệu mẫu
+    import pandas as pd
+    df = pd.DataFrame({
+        "Time": pd.date_range(start="2025-01-01", periods=10, freq="D"),
+        "Value": range(10)
+    })
+    return df
 
 def main():
     data = load_source_data()
