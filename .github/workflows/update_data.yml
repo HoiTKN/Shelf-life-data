@@ -27,6 +27,6 @@ jobs:
       - name: Run update script
         env:
           # Thiết lập các biến môi trường cần thiết:
-          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
         run: python update_sheet.py
