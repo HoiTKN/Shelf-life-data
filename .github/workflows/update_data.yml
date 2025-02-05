@@ -2,9 +2,9 @@ name: Update Google Sheet Data
 
 on:
   schedule:
-    # Chạy vào ngày 1 và 15 của mỗi tháng lúc 00:00 UTC
+    # Ví dụ: chạy vào ngày 1 và 15 mỗi tháng lúc 00:00 UTC
     - cron: '0 0 1,15 * *'
-  workflow_dispatch:  # Cho phép chạy thủ công từ giao diện GitHub
+  workflow_dispatch:  # Cho phép chạy thủ công
 
 jobs:
   update_sheet:
@@ -26,7 +26,6 @@ jobs:
 
       - name: Run update script
         env:
-          # Thiết lập các biến môi trường cần thiết:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
         run: python update_sheet.py
