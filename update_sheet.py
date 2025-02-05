@@ -1,4 +1,5 @@
-# update_sheet.py
+import os
+import json
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -6,70 +7,53 @@ from gspread_dataframe import set_with_dataframe
 
 def load_source_data():
     """
-    Ví dụ: Đọc dữ liệu từ một nguồn khác (có thể từ file CSV, database, v.v.)
-    Ở đây mình tạo dữ liệu mẫu.
+    Hàm này mô phỏng việc load dữ liệu từ nguồn nào đó.
+    Bạn có thể thay thế bằng logic thực tế (ví dụ: đọc file CSV, truy vấn CSDL, v.v.)
     """
-    # Đây chỉ là ví dụ; bạn thay đổi theo logic cập nhật dữ liệu của bạn.
+    # Ví dụ: tạo dữ liệu mẫu
     df = pd.DataFrame({
         "Time": pd.date_range(start="2025-01-01", periods=10, freq="D"),
-        "Value": range(10)
+        "Value": list(range(10))
     })
     return df
 
 def update_google_sheet(data: pd.DataFrame):
-    # Các scope cần thiết cho Google Sheet API
+    # Các scope cần cho Google Sheets API
     scope = [
-        "https://spreadsheets.google.com/feeds", 
-        "https://www.googleapis.com/auth/drive"
-    ]
-    # Đọc credentials từ file JSON hoặc từ st.secrets nếu chạy trong Streamlit
-    # Ở đây, bạn có thể dùng file JSON cục bộ nếu cần, hoặc tích hợp theo cách bạn đã làm trong app.py.
-    # Giả sử bạn sử dụng file JSON cục bộ (nếu dùng GitHub Actions, bạn có thể lưu thông tin này dưới dạng Secrets).
-    import os, json
-
-def update_google_sheet(data):
-    # Các scope cần thiết cho Google Sheet API
-    scope = [
-        "https://spreadsheets.google.com/feeds", 
+        "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # Lấy thông tin credentials từ biến môi trường
+    # Lấy thông tin credentials từ biến môi trường GCP_SERVICE_ACCOUNT
     creds_json = os.environ.get("GCP_SERVICE_ACCOUNT")
     if not creds_json:
         raise ValueError("Không tìm thấy biến môi trường GCP_SERVICE_ACCOUNT")
+    
+    # Chuyển chuỗi JSON thành dict
     creds_dict = json.loads(creds_json)
     
-    from oauth2client.service_account import ServiceAccountCredentials
+    # Xây dựng credentials và ủy quyền
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    
-    import gspread
     client = gspread.authorize(credentials)
     
-    # Lấy URL Google Sheet từ biến môi trường
+    # Lấy URL của Google Sheet từ biến môi trường
     sheet_url = os.environ.get("GOOGLE_SHEET_URL")
     if not sheet_url:
         raise ValueError("Không tìm thấy biến môi trường GOOGLE_SHEET_URL")
     
+    # Mở Google Sheet và chọn worksheet đầu tiên
     spreadsheet = client.open_by_url(sheet_url)
     worksheet = spreadsheet.get_worksheet(0)
     
-    from gspread_dataframe import set_with_dataframe
+    # Cập nhật dữ liệu lên Google Sheet
     set_with_dataframe(worksheet, data)
-    
-def load_source_data():
-    # Ví dụ: tạo dữ liệu mẫu
-    import pandas as pd
-    df = pd.DataFrame({
-        "Time": pd.date_range(start="2025-01-01", periods=10, freq="D"),
-        "Value": range(10)
-    })
-    return df
+    print("Cập nhật dữ liệu lên Google Sheet thành công.")
 
 def main():
+    # Load dữ liệu từ nguồn (thay đổi hàm load_source_data theo nhu cầu thực tế của bạn)
     data = load_source_data()
+    # Cập nhật dữ liệu lên Google Sheet
     update_google_sheet(data)
-    print("Cập nhật dữ liệu lên Google Sheet thành công.")
 
 if __name__ == "__main__":
     main()
