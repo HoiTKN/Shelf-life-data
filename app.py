@@ -1295,3 +1295,12 @@ def implement_enhanced_visualizations(sensory_grouped, threshold_value, qa_summa
                 st.info(f"Không đủ dữ liệu để tạo biểu đồ waterfall cho {selected_test}.")
     else:
         st.info("Không có dữ liệu cảm quan để phân tích.")
+
+st.markdown("---")
+st.markdown("## Enhanced Visualizations")
+
+# Call the function that shows all enhanced visualizations
+if not sensory_grouped.empty:
+    implement_enhanced_visualizations(sensory_grouped, threshold_value, qa_summary)
+else:
+    st.info("Không có dữ liệu cảm quan để hiển thị biểu đồ nâng cao.")
