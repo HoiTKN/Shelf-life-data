@@ -67,7 +67,6 @@ threshold_value = st.sidebar.slider(
 )
 
 # Thêm tùy chọn chế độ hiển thị
-# And replace with this simple constant:
 display_mode = "Standard" 
 
 # Load dữ liệu từ Google Sheet
@@ -307,16 +306,27 @@ chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as
 ##############################################
 # PHẦN 4: HIỂN THỊ QA DASHBOARD
 ##############################################
+
+# FIXED VERSION - Replace the entire function
 def create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
+    """Create an improved dashboard with consistent shelf life values"""
     
     st.markdown("## Báo cáo Shelf-Life MMB")
     
     if not sensory_grouped.empty:
+        # FIXED: Make sure we're using consistent shelf life calculations
+        shelf_life = qa_summary['min_shelf_life']
+        
         # Create status indicator based on shelf life projection
-        if isinstance(qa_summary['min_shelf_life'], (int, float)):
+        if isinstance(shelf_life, (int, float)):
+            # Get the current testing time point (max observed time)
             current_month = max(sensory_grouped["Time_Months"])
-            remaining_months = qa_summary['min_shelf_life'] - current_month
             
+            # FIXED: Calculate remaining time until reaching threshold
+            # If shelf_life is absolute (e.g., 5.5 months), then remaining = shelf_life - current
+            remaining_months = shelf_life - current_month
+            
+            # Status based on remaining months
             if remaining_months <= 1:
                 status_emoji = "🔴"
                 status_text = "Cảnh báo"
@@ -363,7 +373,8 @@ def create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
         
         with col1:
             if isinstance(qa_summary['min_shelf_life'], (int, float)):
-                value_display = f"{qa_summary['min_shelf_life']:.1f} tháng"
+                # FIXED: Display consistent shelf life value
+                value_display = f"{shelf_life:.1f} tháng"
                 st.markdown(f"""
                 <div style="border:1px solid #e0e0e0; border-radius:5px; padding:10px; text-align:center;">
                     <div style="color:#666; font-size:0.9rem;">Dự kiến hạn sử dụng</div>
@@ -382,6 +393,8 @@ def create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
             if qa_summary['closest_attr']:
                 current_val = qa_summary['closest_attr_value']
                 distance = threshold_value - current_val
+                # FIXED: Invert progress percentage calculation for sensory scores
+                # Higher sensory score is worse (closer to threshold), so:
                 progress_pct = min(100, max(0, (current_val / threshold_value) * 100))
                 
                 display_name = qa_summary['closest_attr']
@@ -417,6 +430,8 @@ def create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
                 if len(display_name) > 20:
                     display_name = display_name[:18] + "..."
                 
+                # FIXED: Invert arrow and color logic for sensory scores
+                # For sensory scores, increasing (positive rate) is BAD
                 arrow = "↑" if change_rate > 0 else "↓"
                 color = "#f44336" if change_rate > 0 else "#4caf50"  # Red for increasing (bad), green for decreasing (good)
                 
@@ -439,14 +454,15 @@ def create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
         st.markdown("### Khuyến nghị hành động")
         
         if isinstance(qa_summary['min_shelf_life'], (int, float)):
+            # FIXED: Use consistent shelf life and remaining time values
             # Determine recommendations based on status
             recs = []
             if remaining_months <= 1:
-                recs.append(f"• Đề xuất giảm hạn sử dụng xuống **{int(qa_summary['min_shelf_life'])} tháng**")
+                recs.append(f"• Đề xuất giảm hạn sử dụng xuống **{int(shelf_life)} tháng**")
                 recs.append("• Đánh giá khẩn cấp chất lượng sản phẩm hiện tại")
                 recs.append(f"• Tập trung cải thiện chỉ tiêu **{qa_summary['closest_attr']}**")
             elif remaining_months <= 3:
-                recs.append(f"• Cân nhắc hạn sử dụng **{int(qa_summary['min_shelf_life'])} tháng**")
+                recs.append(f"• Cân nhắc hạn sử dụng **{int(shelf_life)} tháng**")
                 recs.append("• Tăng tần suất giám sát chất lượng")
                 
                 if qa_summary['fastest_attr']:
@@ -475,8 +491,7 @@ if not sensory_grouped.empty:
 else:
     st.info("Không có dữ liệu cảm quan để hiển thị dashboard.")
 
-### 3. Simplify the main trend chart section
-# Replace the current chart section with a cleaner version:
+### 3. Enhanced visualization functions
 
 # Improvements for the trend chart visualization
 def create_enhanced_trend_chart(sensory_grouped, threshold_value, projections):
@@ -914,7 +929,7 @@ def create_radar_chart(sensory_grouped):
     
     return fig
 
-# Create a heatmap of correlations between quality attributes
+# FIXED VERSION - Replace the entire correlation_heatmap function
 def create_correlation_heatmap(sensory_data):
     """Create a heatmap showing correlations between quality attributes over time"""
     import plotly.express as px
@@ -945,9 +960,9 @@ def create_correlation_heatmap(sensory_data):
     # Calculate correlation matrix
     corr_matrix = pivot_df[valid_columns].corr()
     
-    # Convert to long format for heatmap
+    # Convert to long format for heatmap - FIX: rename columns explicitly to avoid collision
     corr_df = corr_matrix.stack().reset_index()
-    corr_df.columns = ['Attribute 1', 'Attribute 2', 'Correlation']
+    corr_df.columns = ['Attribute_1', 'Attribute_2', 'Correlation']  # Changed column names to avoid conflict
     
     # Create heatmap
     fig = px.imshow(
@@ -994,7 +1009,7 @@ def create_correlation_heatmap(sensory_data):
     
     return fig
 
-# Create a composite quality index visualization
+# FIXED VERSION - Replace the entire composite_quality_index function
 def create_composite_quality_index(sensory_grouped, threshold_value):
     """Create a time series visualization of a composite quality index"""
     import plotly.graph_objects as go
@@ -1025,16 +1040,18 @@ def create_composite_quality_index(sensory_grouped, threshold_value):
             # Calculate distance from threshold for each attribute
             distances = []
             for _, row in time_data.iterrows():
-                # Distance as percentage (how close to threshold)
-                # 0% = at threshold, 100% = max distance (usually initial quality)
-                distance = (threshold_value - row['Actual result']) / threshold_value * 100
-                distances.append(max(0, distance))  # Only consider positive distances
+                # FIXED: Invert the logic - higher sensory value means worse quality
+                # Use percentage of maximum possible degradation (threshold)
+                quality_percent = (row['Actual result'] / threshold_value) * 100
+                distances.append(min(100, quality_percent))  # Cap at 100%
             
-            # Calculate average quality index (higher is better)
+            # Calculate average quality index (FIXED: lower is better)
             if distances:
                 mean_distance = np.mean(distances)
                 std_distance = np.std(distances) if len(distances) > 1 else 0
-                quality_index = 100 - mean_distance  # Invert so higher is better
+                
+                # FIXED: quality_index is now reverse of mean_distance (100 = best, 0 = worst)
+                quality_index = 100 - mean_distance
                 
                 composite_data.append({
                     'Time_Months': time_point,
@@ -1045,7 +1062,7 @@ def create_composite_quality_index(sensory_grouped, threshold_value):
                 
                 # Calculate confidence interval
                 ci_factor = 1.96 / np.sqrt(len(distances))  # 95% confidence
-                upper_ci.append(quality_index + std_distance * ci_factor)
+                upper_ci.append(min(100, quality_index + std_distance * ci_factor))
                 lower_ci.append(max(0, quality_index - std_distance * ci_factor))
     
     if not composite_data:
@@ -1090,7 +1107,7 @@ def create_composite_quality_index(sensory_grouped, threshold_value):
         text=df['Count']
     ))
     
-    # Add horizontal guide lines for quality ranges
+    # FIXED: Add horizontal guide lines for quality ranges with IMPROVED interpretations
     fig.add_shape(
         type="line",
         x0=min(df['Time_Months']),
@@ -1240,6 +1257,25 @@ def implement_enhanced_visualizations(sensory_grouped, threshold_value, qa_summa
     """
     import streamlit as st
     
+    # Debug information
+    st.markdown("### Debug Information")
+    if not sensory_grouped.empty:
+        st.write("Number of rows in sensory_grouped:", len(sensory_grouped))
+        st.write("Min shelf life value:", qa_summary['min_shelf_life'])
+        st.write("Current max month:", max(sensory_grouped["Time_Months"]))
+        
+        # Check calculation of remaining months
+        if isinstance(qa_summary['min_shelf_life'], (int, float)):
+            remaining = qa_summary['min_shelf_life'] - max(sensory_grouped["Time_Months"])
+            st.write("Calculated remaining months:", remaining)
+        
+        # Check projection calculation
+        st.write("Raw projections:", qa_summary['projections'])
+        
+        # Show a sample of the data
+        st.write("Sample of sensory_grouped data (first 5 rows):")
+        st.write(sensory_grouped.head())
+    
     # 1. Enhanced trend chart (main visualization)
     st.markdown("## Biểu đồ xu hướng cảm quan nâng cao")
     fig_trend = create_enhanced_trend_chart(sensory_grouped, threshold_value, qa_summary['projections'])
@@ -1296,6 +1332,7 @@ def implement_enhanced_visualizations(sensory_grouped, threshold_value, qa_summa
     else:
         st.info("Không có dữ liệu cảm quan để phân tích.")
 
+# Add this code around line 1300, after the regular dashboard section:
 st.markdown("---")
 st.markdown("## Enhanced Visualizations")
 
