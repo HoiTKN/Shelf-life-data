@@ -67,10 +67,7 @@ threshold_value = st.sidebar.slider(
 )
 
 # Thêm tùy chọn chế độ hiển thị
-display_mode = st.sidebar.radio
-    "Chế độ hiển thị:",
-    options=["Standard"]
-
+display_mode = "Standard"
 # Load dữ liệu từ Google Sheet
 data = load_data()
 if data.empty:
