@@ -478,8 +478,12 @@ else:
 ### 3. Simplify the main trend chart section
 # Replace the current chart section with a cleaner version:
 
-def create_cleaner_trend_chart(sensory_grouped, threshold_value, projections):
-    """Create a cleaner and more informative trend chart"""
+# Improvements for the trend chart visualization
+def create_enhanced_trend_chart(sensory_grouped, threshold_value, projections):
+    """Create an enhanced version of the trend chart with more visual information"""
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import numpy as np
     
     # Create the trend chart with annotations
     fig_sensory = px.line(
@@ -491,19 +495,32 @@ def create_cleaner_trend_chart(sensory_grouped, threshold_value, projections):
         template="plotly_white"
     )
     
-    # Add threshold line
+    # Add threshold line with shaded area
     if not sensory_grouped["Time_Months"].empty:
         x_min = sensory_grouped["Time_Months"].min()
         x_max = sensory_grouped["Time_Months"].max()
         x_range = max(1, x_max - x_min)  # Avoid division by zero
+        extended_x_max = x_max + (x_range * 0.3)  # Extend a bit more
         
+        # Add threshold line
         fig_sensory.add_shape(
             type="line",
             x0=x_min,
-            x1=x_max + (x_range * 0.2),
+            x1=extended_x_max,
             y0=threshold_value,
             y1=threshold_value,
             line=dict(color="red", width=2, dash="dash"),
+        )
+        
+        # Add shaded area above threshold (danger zone)
+        fig_sensory.add_shape(
+            type="rect",
+            x0=x_min,
+            x1=extended_x_max,
+            y0=threshold_value,
+            y1=threshold_value * 1.2,  # Extend upward
+            fillcolor="rgba(255, 0, 0, 0.1)",
+            line=dict(width=0),
         )
         
         # Add threshold label
@@ -513,30 +530,92 @@ def create_cleaner_trend_chart(sensory_grouped, threshold_value, projections):
             text=f"Ngưỡng giới hạn: {threshold_value}",
             showarrow=False,
             font=dict(color="red", size=12),
+            bgcolor="rgba(255, 255, 255, 0.8)",
+            bordercolor="red",
+            borderwidth=1,
+            borderpad=4,
         )
     
-    # Add projection lines
+    # Add projection lines with confidence intervals
     for test, proj_month in projections.items():
         if isinstance(proj_month, (int, float)):
             # Get the last point for this attribute
             test_data = sensory_grouped[sensory_grouped["Test description"] == test].sort_values("Time_Months")
-            if len(test_data) > 0:
+            if len(test_data) > 1:  # Need at least 2 points
                 last_point = test_data.iloc[-1]
                 last_month = last_point["Time_Months"]
                 last_value = last_point["Actual result"]
                 
-                # Add projection line
+                # Calculate projection line
                 color_index = list(sensory_grouped["Test description"].unique()).index(test) % len(px.colors.qualitative.Plotly)
                 line_color = px.colors.qualitative.Plotly[color_index]
                 
-                fig_sensory.add_shape(
-                    type="line",
-                    x0=last_month,
-                    x1=proj_month,
-                    y0=last_value,
-                    y1=threshold_value,
-                    line=dict(color=line_color, width=1, dash="dot"),
-                )
+                # Calculate slope and confidence
+                if len(test_data) >= 3:
+                    x = test_data["Time_Months"].values
+                    y = test_data["Actual result"].values
+                    
+                    # Get slope variance for confidence interval
+                    coeffs = np.polyfit(x, y, 1, cov=True)
+                    slope, intercept = coeffs[0]
+                    slope_variance = coeffs[1][0, 0]
+                    
+                    # Calculate confidence interval boundaries (using 90% confidence)
+                    slope_error = 1.645 * np.sqrt(slope_variance)  # 90% confidence
+                    
+                    # Calculate upper and lower projection points
+                    time_to_threshold = (threshold_value - last_value) / slope
+                    upper_time = (threshold_value - last_value) / (slope + slope_error) if (slope + slope_error) > 0 else None
+                    lower_time = (threshold_value - last_value) / (slope - slope_error) if (slope - slope_error) > 0 else None
+                    
+                    # Add projection line
+                    fig_sensory.add_shape(
+                        type="line",
+                        x0=last_month,
+                        x1=proj_month,
+                        y0=last_value,
+                        y1=threshold_value,
+                        line=dict(color=line_color, width=2, dash="dot"),
+                    )
+                    
+                    # Add confidence interval if we have valid bounds
+                    if upper_time is not None and lower_time is not None:
+                        proj_points_x = [upper_time + last_month, proj_month, lower_time + last_month]
+                        proj_points_y = [threshold_value, threshold_value, threshold_value]
+                        
+                        fig_sensory.add_trace(go.Scatter(
+                            x=proj_points_x,
+                            y=proj_points_y,
+                            mode='markers',
+                            marker=dict(color=line_color, size=8, symbol=['triangle-left', 'circle', 'triangle-right']),
+                            name=f"{test} CI (90%)",
+                            showlegend=False
+                        ))
+                        
+                        # Add semi-transparent confidence band
+                        x_vals = np.linspace(last_month, max(proj_points_x), 50)
+                        lower_y = intercept + (slope - slope_error) * (x_vals - last_month) + last_value
+                        upper_y = intercept + (slope + slope_error) * (x_vals - last_month) + last_value
+                        
+                        fig_sensory.add_trace(go.Scatter(
+                            x=np.concatenate([x_vals, x_vals[::-1]]),
+                            y=np.concatenate([upper_y, lower_y[::-1]]),
+                            fill='toself',
+                            fillcolor=f'rgba{tuple(list(int(line_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4)) + [0.2])}',
+                            line=dict(color='rgba(255,255,255,0)'),
+                            hoverinfo="skip",
+                            showlegend=False
+                        ))
+                else:
+                    # Add simple projection line for cases with limited data
+                    fig_sensory.add_shape(
+                        type="line",
+                        x0=last_month,
+                        x1=proj_month,
+                        y0=last_value,
+                        y1=threshold_value,
+                        line=dict(color=line_color, width=1, dash="dot"),
+                    )
                 
                 # Add projection point
                 fig_sensory.add_trace(
@@ -546,11 +625,25 @@ def create_cleaner_trend_chart(sensory_grouped, threshold_value, projections):
                         mode="markers",
                         marker=dict(
                             symbol="star",
-                            size=10,
+                            size=12,
                             color=line_color,
+                            line=dict(color='black', width=1)
                         ),
-                        name=f"{test} (tháng {proj_month})",
-                        showlegend=True
+                        name=f"{test} (tháng {proj_month:.1f})",
+                        showlegend=False
+                    )
+                )
+                
+                # Add custom hover text for projection point
+                fig_sensory.add_trace(
+                    go.Scatter(
+                        x=[proj_month],
+                        y=[threshold_value],
+                        mode="markers",
+                        marker=dict(opacity=0, size=15),
+                        hoverinfo="text",
+                        hovertext=f"{test}<br>Dự báo đạt ngưỡng: {proj_month:.1f} tháng<br>Từ giá trị hiện tại: {last_value:.2f}",
+                        showlegend=False
                     )
                 )
                 
@@ -559,319 +652,646 @@ def create_cleaner_trend_chart(sensory_grouped, threshold_value, projections):
                     fig_sensory.add_annotation(
                         x=proj_month,
                         y=threshold_value + 0.2,
-                        text=f"{test}: dự báo tháng {proj_month}",
+                        text=f"{test}: {proj_month:.1f} tháng",
                         showarrow=True,
                         arrowhead=2,
                         arrowcolor=line_color,
-                        font=dict(color=line_color, size=10),
+                        font=dict(color=line_color, size=10, family="Arial Black"),
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor=line_color,
+                        borderwidth=1,
+                        borderpad=4,
                     )
     
-    # Clean up the layout
+    # Add vertical line for current time
+    if not sensory_grouped["Time_Months"].empty:
+        current_month = sensory_grouped["Time_Months"].max()
+        fig_sensory.add_shape(
+            type="line",
+            x0=current_month,
+            x1=current_month,
+            y0=sensory_grouped["Actual result"].min() * 0.9,
+            y1=max(threshold_value * 1.1, sensory_grouped["Actual result"].max() * 1.1),
+            line=dict(color="black", width=1, dash="dot"),
+        )
+        
+        fig_sensory.add_annotation(
+            x=current_month,
+            y=sensory_grouped["Actual result"].min() * 0.95,
+            text="Hiện tại",
+            showarrow=False,
+            font=dict(color="black", size=10),
+            bgcolor="white",
+            bordercolor="black",
+            borderwidth=1,
+            borderpad=2,
+        )
+    
+    # Improve hover template to show more details
+    fig_sensory.update_traces(
+        hovertemplate='<b>%{fullData.name}</b><br>Tháng: %{x:.1f}<br>Giá trị: %{y:.2f}<extra></extra>'
+    )
+    
+    # Clean up the layout with improved styling
     fig_sensory.update_layout(
-        title="Xu hướng cảm quan theo thời gian lưu",
-        xaxis_title="Thời gian (tháng)",
-        yaxis_title="Giá trị cảm quan",
-        legend_title="Chỉ tiêu",
-        hovermode="x unified",
-        margin=dict(l=30, r=30, t=50, b=30),
+        title={
+            'text': "Xu hướng cảm quan và dự báo thời gian sử dụng",
+            'y':0.95,
+            'x':0.5,
+            'xanchor': 'center',
+            'yanchor': 'top',
+            'font': dict(size=18, family="Arial", color="#333")
+        },
+        xaxis={
+            'title': "Thời gian (tháng)",
+            'gridcolor': 'rgba(230, 230, 230, 0.8)',
+            'tickvals': list(range(0, int(extended_x_max) + 2)) if 'extended_x_max' in locals() else None,
+        },
+        yaxis={
+            'title': "Giá trị cảm quan",
+            'gridcolor': 'rgba(230, 230, 230, 0.8)',
+        },
+        legend={
+            'title': "Chỉ tiêu",
+            'bgcolor': 'rgba(255, 255, 255, 0.8)',
+            'bordercolor': 'rgba(0, 0, 0, 0.3)',
+            'borderwidth': 1
+        },
+        hovermode="closest",
+        margin=dict(l=30, r=30, t=80, b=30),
+        plot_bgcolor='rgba(255, 255, 255, 1)',
+        paper_bgcolor='rgba(255, 255, 255, 1)',
+        font=dict(family="Arial", size=12),
+    )
+    
+    # Add a disclaimer about projection reliability
+    fig_sensory.add_annotation(
+        x=0.5,
+        y=0,
+        xref="paper",
+        yref="paper",
+        text="Lưu ý: Dự báo dựa trên dữ liệu hiện có và có thể thay đổi khi có thêm dữ liệu mới",
+        showarrow=False,
+        font=dict(size=10, color="gray"),
     )
     
     return fig_sensory
 
-# Use it in your main code:
-st.markdown("## Biểu đồ xu hướng cảm quan")
+# Add a waterfall chart to show change in quality attributes over time
+def create_waterfall_chart(sensory_grouped, selected_test=None):
+    """Create a waterfall chart to visualize changes in quality over time periods"""
+    import plotly.graph_objects as go
+    
+    if selected_test is None and not sensory_grouped.empty:
+        # If no test selected, use the one with most data points
+        test_counts = sensory_grouped['Test description'].value_counts()
+        if not test_counts.empty:
+            selected_test = test_counts.index[0]
+    
+    # Filter for selected test
+    test_data = sensory_grouped[sensory_grouped['Test description'] == selected_test].sort_values('Time_Months')
+    
+    if len(test_data) < 2:
+        return None
+    
+    # Calculate changes between time periods
+    changes = []
+    periods = []
+    measures = []
+    
+    first_value = test_data.iloc[0]['Actual result']
+    last_value = first_value
+    
+    # Add initial value
+    changes.append(first_value)
+    periods.append(f"Tháng {test_data.iloc[0]['Time_Months']:.1f}")
+    measures.append('absolute')
+    
+    # Add changes between periods
+    for i in range(1, len(test_data)):
+        current = test_data.iloc[i]['Actual result']
+        change = current - last_value
+        changes.append(change)
+        periods.append(f"→ Tháng {test_data.iloc[i]['Time_Months']:.1f}")
+        measures.append('relative')
+        last_value = current
+    
+    # Add final value
+    changes.append(test_data.iloc[-1]['Actual result'])
+    periods.append(f"Hiện tại (Tháng {test_data.iloc[-1]['Time_Months']:.1f})")
+    measures.append('total')
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        name=selected_test,
+        orientation="v",
+        measure=measures,
+        x=periods,
+        y=changes,
+        text=[f"{y:.2f}" for y in changes],
+        textposition="outside",
+        connector={"line": {"color": "rgb(63, 63, 63)"}},
+        decreasing={"marker": {"color": "#7CFC00"}},  # Green for improvements (decreasing is better for sensory)
+        increasing={"marker": {"color": "#FF4500"}},  # Red for degradation
+        totals={"marker": {"color": "#0047AB"}}      # Blue for totals
+    ))
+    
+    fig.update_layout(
+        title={
+            'text': f"Biến đổi chất lượng {selected_test} theo thời gian",
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': dict(size=16)
+        },
+        showlegend=False,
+        yaxis={
+            'title': "Giá trị cảm quan",
+            'gridcolor': 'rgba(230, 230, 230, 0.8)'
+        },
+        margin=dict(l=30, r=30, t=80, b=30),
+        plot_bgcolor='rgba(255, 255, 255, 1)',
+        paper_bgcolor='rgba(255, 255, 255, 1)',
+    )
+    
+    return fig
 
-if not sensory_grouped.empty:
-    # Create and display the trend chart
-    fig_sensory = create_cleaner_trend_chart(sensory_grouped, threshold_value, qa_summary['projections'])
-    st.plotly_chart(fig_sensory, use_container_width=True)
+# Create a radar chart to compare sensory attributes at different time points
+def create_radar_chart(sensory_grouped):
+    """Create a radar chart to compare different time points for all sensory attributes"""
+    import plotly.graph_objects as go
+    import pandas as pd
     
-    # Create a more useful table with key trends and projections
-    st.markdown("### Dự báo thời hạn sử dụng")
+    if sensory_grouped.empty:
+        return None
     
-    # Group by priority (closest to threshold first)
-    projection_data = []
-    for test, value in qa_summary['projections'].items():
-        latest_data = sensory_grouped[sensory_grouped["Test description"] == test].sort_values("Time_Months").iloc[-1]
-        current_value = latest_data['Actual result']
-        distance = threshold_value - current_value if current_value < threshold_value else 0
+    # Group by test description
+    all_tests = sensory_grouped['Test description'].unique()
+    
+    # Determine time points to compare (initial, middle, latest)
+    all_months = sorted(sensory_grouped['Time_Months'].unique())
+    
+    if len(all_months) < 2:
+        return None
+    
+    # Always include first and last month
+    compare_months = [all_months[0], all_months[-1]]
+    
+    # Add a middle month if available
+    if len(all_months) >= 3:
+        middle_idx = len(all_months) // 2
+        compare_months.insert(1, all_months[middle_idx])
+    
+    # Create nice labels for the time points
+    month_labels = [f"Tháng {m:.1f}" for m in compare_months]
+    
+    # Prepare data for radar chart
+    radar_data = []
+    
+    for month, label in zip(compare_months, month_labels):
+        # Get data for this month
+        month_values = {}
         
-        # Get change rate
-        change_rate = qa_summary['change_rates'].get(test, "N/A")
-        if isinstance(change_rate, (int, float)):
-            change_text = f"{change_rate:.2f}/tháng"
-            months_to_threshold = distance / change_rate if change_rate > 0 else float('inf')
-        else:
-            change_text = "N/A"
-            months_to_threshold = float('inf')
+        for test in all_tests:
+            test_at_month = sensory_grouped[
+                (sensory_grouped['Test description'] == test) & 
+                (sensory_grouped['Time_Months'] == month)
+            ]
             
-        # Calculate a priority score (lower = higher priority)
-        if isinstance(value, (int, float)):
-            priority = value
-        else:
-            priority = float('inf')
-            
-        projection_data.append({
-            "Chỉ tiêu": test,
-            "Giá trị hiện tại": current_value,
-            "Khoảng cách": distance,
-            "Tốc độ thay đổi": change_text,
-            "Ước tính đạt ngưỡng": value,
-            "priority": priority
-        })
-    
-    if projection_data:
-        # Sort by priority
-        projection_data.sort(key=lambda x: x["priority"])
+            if not test_at_month.empty:
+                month_values[test] = test_at_month['Actual result'].values[0]
+            else:
+                # If no exact match, get closest month
+                test_data = sensory_grouped[sensory_grouped['Test description'] == test]
+                if not test_data.empty:
+                    closest_idx = (test_data['Time_Months'] - month).abs().idxmin()
+                    month_values[test] = test_data.loc[closest_idx, 'Actual result']
+                else:
+                    month_values[test] = None
         
-        # Create DataFrame without the priority column
-        df_display = pd.DataFrame(projection_data)
-        if 'priority' in df_display.columns:
-            df_display = df_display.drop('priority', axis=1)
+        # Filter out None values
+        valid_tests = [test for test in all_tests if month_values.get(test) is not None]
+        
+        if valid_tests:
+            radar_data.append(
+                go.Scatterpolar(
+                    r=[month_values[test] for test in valid_tests],
+                    theta=valid_tests,
+                    fill='toself',
+                    name=label
+                )
+            )
+    
+    # Create the radar chart
+    fig = go.Figure(radar_data)
+    
+    # Update layout
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, max([
+                    max([trace['r'][i] for i in range(len(trace['r']))], default=0) 
+                    for trace in radar_data
+                ], default=10) * 1.1]
+            )
+        ),
+        title={
+            'text': "So sánh chỉ tiêu cảm quan theo thời gian",
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': dict(size=16)
+        },
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=dict(l=30, r=30, t=80, b=30),
+    )
+    
+    return fig
+
+# Create a heatmap of correlations between quality attributes
+def create_correlation_heatmap(sensory_data):
+    """Create a heatmap showing correlations between quality attributes over time"""
+    import plotly.express as px
+    import pandas as pd
+    import numpy as np
+    
+    if sensory_data.empty:
+        return None
+    
+    # Pivot data to get attributes as columns and time as index
+    pivot_df = sensory_data.pivot_table(
+        index='Time_Months', 
+        columns='Test description', 
+        values='Actual result', 
+        aggfunc='mean'
+    )
+    
+    # Fill NAs with forward fill (or other appropriate method)
+    pivot_df = pivot_df.ffill().bfill()
+    
+    # Only include attributes with sufficient data points
+    min_required = 3  # Require at least 3 data points
+    valid_columns = [col for col in pivot_df.columns if pivot_df[col].count() >= min_required]
+    
+    if len(valid_columns) < 2:
+        return None
+    
+    # Calculate correlation matrix
+    corr_matrix = pivot_df[valid_columns].corr()
+    
+    # Convert to long format for heatmap
+    corr_df = corr_matrix.stack().reset_index()
+    corr_df.columns = ['Attribute 1', 'Attribute 2', 'Correlation']
+    
+    # Create heatmap
+    fig = px.imshow(
+        corr_matrix,
+        color_continuous_scale='RdBu_r',  # Red-Blue scale, reversed (Blue = positive, Red = negative)
+        zmin=-1,
+        zmax=1,
+        text_auto='.2f',
+        aspect="auto",
+        title="Tương quan giữa các chỉ tiêu chất lượng",
+    )
+    
+    # Update layout
+    fig.update_layout(
+        xaxis_title="",
+        yaxis_title="",
+        xaxis={'side': 'bottom'},
+        margin=dict(l=30, r=30, t=80, b=30),
+        coloraxis_colorbar=dict(
+            title="Hệ số<br>tương quan",
+            titleside="right",
+            thickness=15,
+            len=0.6,
+            outlinewidth=0
+        ),
+    )
+    
+    # Improve text and font sizes
+    fig.update_traces(
+        textfont=dict(size=10),
+    )
+    
+    # Make clearer diagonal
+    diagonal_values = np.eye(len(corr_matrix)) * 2 - 1  # Creates 1s on diagonal and 0s elsewhere
+    diagonal_text = np.full_like(diagonal_values, "", dtype=object)
+    
+    # Add diagonal highlight
+    fig.add_trace(
+        px.imshow(
+            diagonal_values, 
+            text_auto=diagonal_text
+        ).data[0]
+    )
+    
+    return fig
+
+# Create a composite quality index visualization
+def create_composite_quality_index(sensory_grouped, threshold_value):
+    """Create a time series visualization of a composite quality index"""
+    import plotly.graph_objects as go
+    import pandas as pd
+    import numpy as np
+    
+    if sensory_grouped.empty:
+        return None
+    
+    # Get all unique time points
+    all_times = sorted(sensory_grouped['Time_Months'].unique())
+    
+    if len(all_times) < 2:
+        return None
+    
+    # Prepare to calculate composite index across time
+    composite_data = []
+    upper_ci = []
+    lower_ci = []
+    
+    # For each time point, calculate:
+    # 1. Mean distance from threshold (as percentage)
+    # 2. Standard deviation of distances
+    for time_point in all_times:
+        time_data = sensory_grouped[sensory_grouped['Time_Months'] == time_point]
+        
+        if len(time_data) > 0:
+            # Calculate distance from threshold for each attribute
+            distances = []
+            for _, row in time_data.iterrows():
+                # Distance as percentage (how close to threshold)
+                # 0% = at threshold, 100% = max distance (usually initial quality)
+                distance = (threshold_value - row['Actual result']) / threshold_value * 100
+                distances.append(max(0, distance))  # Only consider positive distances
             
-        # Format the numeric columns
-        for col in ["Giá trị hiện tại", "Khoảng cách"]:
-            if col in df_display.columns:
-                df_display[col] = df_display[col].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
+            # Calculate average quality index (higher is better)
+            if distances:
+                mean_distance = np.mean(distances)
+                std_distance = np.std(distances) if len(distances) > 1 else 0
+                quality_index = 100 - mean_distance  # Invert so higher is better
                 
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+                composite_data.append({
+                    'Time_Months': time_point,
+                    'Quality_Index': quality_index,
+                    'StdDev': std_distance,
+                    'Count': len(distances)
+                })
+                
+                # Calculate confidence interval
+                ci_factor = 1.96 / np.sqrt(len(distances))  # 95% confidence
+                upper_ci.append(quality_index + std_distance * ci_factor)
+                lower_ci.append(max(0, quality_index - std_distance * ci_factor))
+    
+    if not composite_data:
+        return None
+    
+    # Convert to DataFrame for plotting
+    df = pd.DataFrame(composite_data)
+    
+    # Create gauge-like visualization
+    fig = go.Figure()
+    
+    # Add confidence interval as shaded area
+    fig.add_trace(go.Scatter(
+        x=df['Time_Months'],
+        y=upper_ci,
+        mode='lines',
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=df['Time_Months'],
+        y=lower_ci,
+        mode='lines',
+        line=dict(width=0),
+        fill='tonexty',
+        fillcolor='rgba(0, 100, 80, 0.2)',
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+    
+    # Add main line
+    fig.add_trace(go.Scatter(
+        x=df['Time_Months'],
+        y=df['Quality_Index'],
+        mode='lines+markers',
+        line=dict(color='rgb(0, 100, 80)', width=3),
+        marker=dict(size=8, color='rgb(0, 100, 80)'),
+        name='Chỉ số chất lượng tổng hợp',
+        hovertemplate='Tháng %{x:.1f}<br>Chỉ số chất lượng: %{y:.1f}%<br>Số chỉ tiêu: %{text}<extra></extra>',
+        text=df['Count']
+    ))
+    
+    # Add horizontal guide lines for quality ranges
+    fig.add_shape(
+        type="line",
+        x0=min(df['Time_Months']),
+        x1=max(df['Time_Months']),
+        y0=20,
+        y1=20,
+        line=dict(color="red", width=1, dash="dash"),
+    )
+    
+    fig.add_shape(
+        type="line",
+        x0=min(df['Time_Months']),
+        x1=max(df['Time_Months']),
+        y0=50,
+        y1=50,
+        line=dict(color="orange", width=1, dash="dash"),
+    )
+    
+    fig.add_shape(
+        type="line",
+        x0=min(df['Time_Months']),
+        x1=max(df['Time_Months']),
+        y0=80,
+        y1=80,
+        line=dict(color="green", width=1, dash="dash"),
+    )
+    
+    # Add annotations for quality ranges
+    fig.add_annotation(
+        x=max(df['Time_Months']),
+        y=10,
+        text="Cảnh báo",
+        showarrow=False,
+        font=dict(color="red", size=10),
+        xanchor="left",
+        xshift=10
+    )
+    
+    fig.add_annotation(
+        x=max(df['Time_Months']),
+        y=35,
+        text="Cảnh giác",
+        showarrow=False,
+        font=dict(color="orange", size=10),
+        xanchor="left",
+        xshift=10
+    )
+    
+    fig.add_annotation(
+        x=max(df['Time_Months']),
+        y=65,
+        text="Chấp nhận",
+        showarrow=False,
+        font=dict(color="#9ACD32", size=10),  # Yellowgreen
+        xanchor="left",
+        xshift=10
+    )
+    
+    fig.add_annotation(
+        x=max(df['Time_Months']),
+        y=90,
+        text="Tốt",
+        showarrow=False,
+        font=dict(color="green", size=10),
+        xanchor="left",
+        xshift=10
+    )
+    
+    # Update layout
+    fig.update_layout(
+        title={
+            'text': "Chỉ số chất lượng sản phẩm theo thời gian",
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': dict(size=16)
+        },
+        xaxis_title="Thời gian (tháng)",
+        yaxis=dict(
+            title="Chỉ số chất lượng (%)",
+            range=[0, 105],
+            gridcolor='rgba(230, 230, 230, 0.8)'
+        ),
+        margin=dict(l=30, r=30, t=80, b=30),
+        showlegend=False,
+        plot_bgcolor='rgba(255, 255, 255, 1)',
+    )
+    
+    # Add colored background zones
+    fig.add_shape(
+        type="rect",
+        x0=min(df['Time_Months']),
+        x1=max(df['Time_Months']),
+        y0=0,
+        y1=20,
+        fillcolor="rgba(255, 0, 0, 0.1)",
+        line=dict(width=0),
+        layer="below"
+    )
+    
+    fig.add_shape(
+        type="rect",
+        x0=min(df['Time_Months']),
+        x1=max(df['Time_Months']),
+        y0=20,
+        y1=50,
+        fillcolor="rgba(255, 165, 0, 0.1)",
+        line=dict(width=0),
+        layer="below"
+    )
+    
+    fig.add_shape(
+        type="rect",
+        x0=min(df['Time_Months']),
+        x1=max(df['Time_Months']),
+        y0=50,
+        y1=80,
+        fillcolor="rgba(154, 205, 50, 0.1)",
+        line=dict(width=0),
+        layer="below"
+    )
+    
+    fig.add_shape(
+        type="rect",
+        x0=min(df['Time_Months']),
+        x1=max(df['Time_Months']),
+        y0=80,
+        y1=105,
+        fillcolor="rgba(0, 128, 0, 0.1)",
+        line=dict(width=0),
+        layer="below"
+    )
+    
+    return fig
+
+# Helper function to implement these visualizations in the app
+def implement_enhanced_visualizations(sensory_grouped, threshold_value, qa_summary):
+    """
+    Call this function in the app to implement the enhanced visualizations
+    
+    Args:
+        sensory_grouped: The grouped sensory data DataFrame
+        threshold_value: The quality threshold value
+        qa_summary: The quality summary dictionary
+        
+    Returns:
+        None (displays visualizations in Streamlit)
+    """
+    import streamlit as st
+    
+    # 1. Enhanced trend chart (main visualization)
+    st.markdown("## Biểu đồ xu hướng cảm quan nâng cao")
+    fig_trend = create_enhanced_trend_chart(sensory_grouped, threshold_value, qa_summary['projections'])
+    st.plotly_chart(fig_trend, use_container_width=True)
+    
+    # 2. Composite quality index
+    st.markdown("## Chỉ số chất lượng tổng hợp")
+    fig_composite = create_composite_quality_index(sensory_grouped, threshold_value)
+    if fig_composite:
+        st.plotly_chart(fig_composite, use_container_width=True)
     else:
-        st.info("Không đủ dữ liệu để dự báo thời hạn sử dụng.")
-else:
-    st.info("Không có dữ liệu cảm quan để hiển thị biểu đồ.")
-
-### 4. Simplify the analysis tabs - Combine into one clear section
-# Replace the current tabs with a more focused analysis:
-
-st.markdown("## Đánh giá chung về xu hướng Chất lượng ")
-
-if not sensory_grouped.empty and len(qa_summary['change_rates']) > 0:
-    # Create one clear column layout
-    col1, col2 = st.columns([2, 1])
+        st.info("Không đủ dữ liệu để tạo chỉ số chất lượng tổng hợp.")
+    
+    # 3. Detailed analysis with multiple charts
+    st.markdown("## Phân tích chi tiết")
+    
+    # 3.1. Correlation heatmap
+    col1, col2 = st.columns(2)
     
     with col1:
-        # Create rate of change chart
-        change_df = pd.DataFrame([
-            {"Chỉ tiêu": test, "Tốc độ thay đổi": rate}
-            for test, rate in qa_summary['change_rates'].items()
-        ])
-        
-        if not change_df.empty:
-            # Sort by change rate (fastest first)
-            change_df = change_df.sort_values("Tốc độ thay đổi", ascending=False)
-            
-            # Create horizontal bar chart
-            fig_change = px.bar(
-                change_df,
-                y="Chỉ tiêu",
-                x="Tốc độ thay đổi",
-                orientation="h",
-                title="Tốc độ thay đổi của các chỉ tiêu (đơn vị/tháng)",
-                template="plotly_white",
-                text_auto='.2f'
-            )
-            
-            # Add a vertical reference line at 0
-            fig_change.add_vline(
-                x=0, 
-                line_width=1, 
-                line_dash="dash", 
-                line_color="gray",
-            )
-            
-            # Color bars based on value (positive = red, negative = green)
-            fig_change.update_traces(
-                marker_color=[
-                    'red' if x > 0 else 'green' for x in change_df["Tốc độ thay đổi"]
-                ],
-                opacity=0.7
-            )
-            
-            fig_change.update_layout(
-                xaxis_title="Tốc độ thay đổi (đơn vị/tháng)",
-                yaxis_title="",
-                height=350
-            )
-            
-            # Display chart
-            st.plotly_chart(fig_change, use_container_width=True)
-    
-    with col2:
-        # Determine which attributes are changing significantly
-        significant_change = 0.1  # Threshold for significant change
-        improving = [attr for attr, rate in qa_summary['change_rates'].items() if rate < -significant_change]
-        worsening = [attr for attr, rate in qa_summary['change_rates'].items() if rate > significant_change]
-        stable = [attr for attr, rate in qa_summary['change_rates'].items() 
-                 if abs(rate) <= significant_change]
-        
-        # Create insights
-        st.markdown("### Đánh giá xu hướng")
-        
-        # Add icons
-        if worsening:
-            st.markdown("""
-            <div style="background-color:#ffebee; padding:10px; border-radius:5px; margin-bottom:10px;">
-                <div style="font-weight:bold; color:#d32f2f;">⚠️ Chỉ tiêu đang xấu đi:</div>
-            """, unsafe_allow_html=True)
-            
-            for attr in worsening:
-                rate = qa_summary['change_rates'][attr]
-                st.markdown(f"• **{attr}**: +{rate:.2f}/tháng")
-                
-            st.markdown("</div>", unsafe_allow_html=True)
-        
-        if improving:
-            st.markdown("""
-            <div style="background-color:#e8f5e9; padding:10px; border-radius:5px; margin-bottom:10px;">
-                <div style="font-weight:bold; color:#388e3c;">✅ Chỉ tiêu đang cải thiện:</div>
-            """, unsafe_allow_html=True)
-            
-            for attr in improving:
-                rate = qa_summary['change_rates'][attr]
-                st.markdown(f"• **{attr}**: {rate:.2f}/tháng")
-                
-            st.markdown("</div>", unsafe_allow_html=True)
-        
-        if stable:
-            st.markdown("""
-            <div style="background-color:#e3f2fd; padding:10px; border-radius:5px; margin-bottom:10px;">
-                <div style="font-weight:bold; color:#1976d2;">ℹ️ Chỉ tiêu ổn định:</div>
-            """, unsafe_allow_html=True)
-            
-            for attr in stable:
-                st.markdown(f"• **{attr}**")
-                
-            st.markdown("</div>", unsafe_allow_html=True)
-
-### 5. Add a concise regression analysis section
-# Keep only the most useful analysis from statsmodels
-
-st.markdown("## Phân tích hồi quy")
-
-if not insight_data.empty and "Time_Months" in insight_data.columns:
-    # Create a more focused and informative regression analysis
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Scatter plot with trendline - just for most critical attributes
-        critical_attrs = []
-        if qa_summary['closest_attr']:
-            critical_attrs.append(qa_summary['closest_attr'])
-        if qa_summary['fastest_attr'] and qa_summary['fastest_attr'] not in critical_attrs:
-            critical_attrs.append(qa_summary['fastest_attr'])
-            
-        # If we have no critical attributes, use all
-        if not critical_attrs and 'Test description' in insight_data.columns:
-            critical_attrs = insight_data['Test description'].unique().tolist()
-            
-        # If we have too many, limit to top 3
-        if len(critical_attrs) > 3:
-            critical_attrs = critical_attrs[:3]
-            
-        # Filter data for critical attributes
-        if critical_attrs and 'Test description' in insight_data.columns:
-            critical_data = insight_data[insight_data['Test description'].isin(critical_attrs)]
+        st.markdown("### Tương quan giữa các chỉ tiêu")
+        fig_corr = create_correlation_heatmap(sensory_grouped)
+        if fig_corr:
+            st.plotly_chart(fig_corr, use_container_width=True)
         else:
-            critical_data = insight_data
-            
-        # Create scatter plot with trendline
-        fig_scatter = px.scatter(
-            critical_data,
-            x="Time_Months",
-            y="Actual result",
-            color="Test description",
-            template="plotly_white",
-            trendline="ols",
-            title="Phân tích hồi quy cho chỉ tiêu chính"
-        )
-        
-        # Add threshold line
-        fig_scatter.add_shape(
-            type="line",
-            x0=critical_data["Time_Months"].min(),
-            x1=critical_data["Time_Months"].max() * 1.2,
-            y0=threshold_value,
-            y1=threshold_value,
-            line=dict(color="red", width=2, dash="dash"),
-        )
-        
-        fig_scatter.update_layout(
-            xaxis_title="Thời gian (tháng)", 
-            yaxis_title="Kết quả Actual",
-            height=400
-        )
-        
-        st.plotly_chart(fig_scatter, use_container_width=True)
+            st.info("Không đủ dữ liệu để tạo bản đồ tương quan.")
     
     with col2:
-        # Add a more concise equation interpretation
-        st.markdown("### Phương trình dự báo")
+        st.markdown("### So sánh theo thời gian")
+        fig_radar = create_radar_chart(sensory_grouped)
+        if fig_radar:
+            st.plotly_chart(fig_radar, use_container_width=True)
+        else:
+            st.info("Không đủ dữ liệu để tạo biểu đồ radar.")
+    
+    # 3.2. Waterfall chart
+    st.markdown("### Phân tích biến đổi chất lượng")
+    
+    # Dropdown to select attribute for waterfall chart
+    if not sensory_grouped.empty:
+        available_tests = sensory_grouped['Test description'].unique().tolist()
+        selected_test = st.selectbox(
+            "Chọn chỉ tiêu để phân tích chi tiết:", 
+            available_tests,
+            index=0 if available_tests else None
+        )
         
-        import statsmodels.api as sm
-        
-        equations = []
-        
-        for test in critical_attrs:
-            test_data = insight_data[insight_data["Test description"] == test].dropna(subset=["Time_Months", "Actual result"])
-            
-            if len(test_data) >= 3:  # Need at least 3 points for meaningful regression
-                X = sm.add_constant(test_data["Time_Months"])
-                y = test_data["Actual result"]
-                
-                try:
-                    model = sm.OLS(y, X).fit()
-                    intercept = model.params[0]
-                    slope = model.params[1]
-                    r_squared = model.rsquared
-                    
-                    # Calculate projected month to reach threshold
-                    if slope > 0:
-                        projected_month = (threshold_value - intercept) / slope
-                        projection_text = f"{projected_month:.1f} tháng"
-                        
-                        equations.append({
-                            "test": test,
-                            "intercept": intercept,
-                            "slope": slope,
-                            "r_squared": r_squared,
-                            "projected_month": projected_month
-                        })
-                    else:
-                        equations.append({
-                            "test": test,
-                            "intercept": intercept,
-                            "slope": slope,
-                            "r_squared": r_squared,
-                            "projected_month": None
-                        })
-                except:
-                    pass
-        
-        # Display equations in a nice format
-        for eq in equations:
-            slope_sign = "+" if eq["slope"] > 0 else ""
-            
-            quality = ""
-            if eq["r_squared"] >= 0.9:
-                quality = "🔵 Dự báo đáng tin cậy cao"
-            elif eq["r_squared"] >= 0.7:
-                quality = "🟢 Dự báo đáng tin cậy"
-            elif eq["r_squared"] >= 0.5:
-                quality = "🟠 Dự báo tin cậy trung bình"
+        if selected_test:
+            fig_waterfall = create_waterfall_chart(sensory_grouped, selected_test)
+            if fig_waterfall:
+                st.plotly_chart(fig_waterfall, use_container_width=True)
             else:
-                quality = "🔴 Dự báo độ tin cậy thấp"
-                
-            st.markdown(f"""
-            **{eq['test']}**:
-            - y = {eq['intercept']:.2f} {slope_sign}{eq['slope']:.2f}x
-            - R² = {eq['r_squared']:.2f} ({quality})
-            """)
-            
-            if eq["projected_month"] is not None:
-                st.markdown(f"- Dự báo đạt ngưỡng: **{eq['projected_month']:.1f} tháng**")
-            else:
-                st.markdown("- Không thể dự báo (xu hướng đi ngang hoặc giảm)")
-                
-            st.markdown("---")
-else:
-    st.info("Không đủ dữ liệu để phân tích hồi quy.")
+                st.info(f"Không đủ dữ liệu để tạo biểu đồ waterfall cho {selected_test}.")
+    else:
+        st.info("Không có dữ liệu cảm quan để phân tích.")
