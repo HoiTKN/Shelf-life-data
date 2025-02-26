@@ -63,6 +63,8 @@ st.sidebar.header("Cấu hình phân tích")
 # Thêm thanh trượt cho ngưỡng giới hạn cảm quan
 threshold_value = st.sidebar.slider(
     "Ngưỡng giới hạn cảm quan:",
+    min_value=4.0,
+    max_value=9.0,
     value=6.5,
     step=0.1,
     help="Giá trị cảm quan vượt qua ngưỡng này được coi là không đạt"
@@ -74,8 +76,8 @@ show_projection = st.sidebar.checkbox("Hiển thị dự báo thời hạn sử 
 # Thêm tùy chọn chế độ hiển thị
 display_mode = st.sidebar.radio(
     "Chế độ hiển thị:",
-    options=["Standard"],
-    index=1
+    options=["Standard", "Professional", "Compact"],
+    index=0
 )
 
 # 1. Lọc theo ngành hàng (Category description)
@@ -497,6 +499,21 @@ if not insight_data.empty:
     st.plotly_chart(fig_box, use_container_width=True)
 else:
     st.info("Không đủ dữ liệu để vẽ Box Plot.")
+
+# 2. Histogram: Phân bố kết quả kiểm theo tháng lưu, hiển thị theo từng chỉ tiêu
+if not insight_data.empty:
+    fig_hist = px.histogram(
+        insight_data,
+        x="Time_Months",
+        color="Test description",
+        facet_col="Test description",
+        template="plotly_white",
+        title="Histogram: Phân bố kết quả kiểm theo tháng lưu (theo chỉ tiêu)"
+    )
+    fig_hist.update_layout(xaxis_title="Thời gian (tháng)", yaxis_title="Số lượng mẫu")
+    st.plotly_chart(fig_hist, use_container_width=True)
+else:
+    st.info("Không đủ dữ liệu để vẽ Histogram.")
 
 # 3. Scatter Plot với trendline: Mối quan hệ giữa thời gian lưu và kết quả kiểm
 if not insight_data.empty and "Time_Months" in insight_data.columns:
