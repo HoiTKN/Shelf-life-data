@@ -55,6 +55,7 @@ if data.empty:
 ##############################################
 
 st.sidebar.header("Bộ lọc dữ liệu")
+
 ## 1. Modify the sidebar configuration section 
 # Replace the current configuration section with this (remove the checkbox option)
 st.sidebar.markdown("---")
