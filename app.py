@@ -67,7 +67,7 @@ threshold_value = st.sidebar.slider(
 )
 
 # Thêm tùy chọn chế độ hiển thị
-display_mode = st.sidebar.radio(
+display_mode = st.sidebar.radio
     "Chế độ hiển thị:",
     options=["Standard"]
 
