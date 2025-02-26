@@ -643,7 +643,7 @@ else:
 ### 4. Simplify the analysis tabs - Combine into one clear section
 # Replace the current tabs with a more focused analysis:
 
-st.markdown("## Đánh giá của QA Manager")
+st.markdown("## Đánh giá chung về xu hướng Chất lượng ")
 
 if not sensory_grouped.empty and len(qa_summary['change_rates']) > 0:
     # Create one clear column layout
