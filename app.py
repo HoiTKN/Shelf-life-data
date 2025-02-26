@@ -6,6 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import get_as_dataframe
 import numpy as np
+import statsmodels.api as sm
 
 ##############################################
 # PHẦN 1: LOAD DỮ LIỆU TỪ GOOGLE SHEET
@@ -45,19 +46,13 @@ def load_data():
     df = df.dropna(how="all")
     return df
 
-# Load dữ liệu từ Google Sheet
-data = load_data()
-if data.empty:
-    st.stop()
-
 ##############################################
 # PHẦN 2: TẠO BỘ LỌC TRÊN SIDEBAR
 ##############################################
 
 st.sidebar.header("Bộ lọc dữ liệu")
 
-## 1. Modify the sidebar configuration section 
-# Replace the current configuration section with this (remove the checkbox option)
+# Cấu hình phân tích
 st.sidebar.markdown("---")
 st.sidebar.header("Cấu hình phân tích")
 
@@ -78,8 +73,118 @@ display_mode = st.sidebar.radio(
     index=0
 )
 
-## 2. Add a QA summary dashboard at the top of the visualizations
-# Add this right after processing the data, before the chart sections
+# Load dữ liệu từ Google Sheet
+data = load_data()
+if data.empty:
+    st.stop()
+
+# 1. Lọc theo ngành hàng (Category description)
+categories = data["Category description"].dropna().unique().tolist()
+selected_categories = st.sidebar.multiselect(
+    "Chọn ngành hàng:",
+    options=categories,
+    default=[]
+)
+if not selected_categories:
+    selected_categories_filter = categories
+else:
+    selected_categories_filter = selected_categories
+
+# 2. Lọc theo sản phẩm (Spec description) dựa trên ngành hàng đã chọn
+data_by_category = data[data["Category description"].isin(selected_categories_filter)]
+specs_in_category = data_by_category["Spec description"].dropna().unique().tolist()
+selected_specs = st.sidebar.multiselect(
+    "Chọn sản phẩm:",
+    options=specs_in_category,
+    default=[]
+)
+if not selected_specs:
+    selected_specs_filter = specs_in_category
+else:
+    selected_specs_filter = selected_specs
+
+# 3. Lọc theo chỉ tiêu (Test description) dựa trên sản phẩm đã lọc
+data_filtered = data_by_category[data_by_category["Spec description"].isin(selected_specs_filter)]
+test_descriptions = data_filtered["Test description"].dropna().unique().tolist()
+selected_tests = st.sidebar.multiselect(
+    "Chọn chỉ tiêu (Test description) cho thống kê:",
+    options=test_descriptions,
+    default=[]
+)
+if not selected_tests:
+    selected_tests_filter = test_descriptions
+else:
+    selected_tests_filter = selected_tests
+
+##############################################
+# PHẦN 3: XỬ LÝ DỮ LIỆU CHO BIỂU ĐỒ
+##############################################
+
+# Hàm dự báo thời điểm đạt ngưỡng giới hạn
+def calculate_projections(df, test_col, time_col, value_col, threshold=6.5):
+    """
+    Dự báo thời điểm đạt ngưỡng giới hạn cho từng chỉ tiêu
+    
+    Args:
+        df: DataFrame với dữ liệu
+        test_col: Tên cột chứa tên chỉ tiêu 
+        time_col: Tên cột chứa thời gian (tháng)
+        value_col: Tên cột chứa giá trị cảm quan
+        threshold: Ngưỡng giới hạn
+        
+    Returns:
+        dict: Dự báo cho mỗi chỉ tiêu
+    """
+    projections = {}
+    
+    # Nhóm dữ liệu theo chỉ tiêu
+    for test, group in df.groupby(test_col):
+        if len(group) < 2:
+            projections[test] = "Không đủ dữ liệu"
+            continue
+            
+        # Sắp xếp theo thời gian và lấy 3 điểm gần nhất
+        group = group.sort_values(time_col)
+        recent_points = group.tail(3)
+        
+        if len(recent_points) < 2:
+            projections[test] = "Không đủ dữ liệu"
+            continue
+            
+        # Tính tốc độ thay đổi
+        x_values = recent_points[time_col].values
+        y_values = recent_points[value_col].values
+        
+        # Tính hệ số góc của đường thẳng (tốc độ thay đổi)
+        if len(set(x_values)) < 2:
+            projections[test] = "Không đủ dữ liệu"
+            continue
+            
+        try:
+            # Sử dụng numpy polyfit để tìm đường thẳng tốt nhất
+            slope, intercept = np.polyfit(x_values, y_values, 1)
+            
+            # Điểm cuối cùng
+            last_x = x_values[-1]
+            last_y = y_values[-1]
+            
+            # Nếu đường thẳng đi xuống hoặc ngang
+            if slope <= 0:
+                projections[test] = "Không xác định (xu hướng đi ngang hoặc giảm)"
+            else:
+                # Tính thời điểm đạt ngưỡng (x = (threshold - intercept) / slope)
+                projected_month = (threshold - intercept) / slope
+                
+                # Nếu đã vượt ngưỡng
+                if last_y >= threshold:
+                    projections[test] = "Đã vượt ngưỡng"
+                else:
+                    projections[test] = round(projected_month, 1)
+        except Exception as e:
+            projections[test] = "Lỗi khi tính toán"
+    
+    return projections
+
 def generate_qa_summary(sensory_grouped, threshold_value):
     """Generate a QA summary dashboard with key metrics"""
     if sensory_grouped.empty:
@@ -100,7 +205,7 @@ def generate_qa_summary(sensory_grouped, threshold_value):
         try:
             if isinstance(val, (int, float)):
                 shelf_life_values.append(val)
-        except:
+        except Exception:
             pass
     
     min_shelf_life = min(shelf_life_values) if shelf_life_values else "Không xác định"
@@ -150,7 +255,62 @@ def generate_qa_summary(sensory_grouped, threshold_value):
         'latest_values': latest_values
     }
 
-# Display QA Dashboard
+# Tính cột Time_Months dựa trên cột Sample Name (ví dụ: "01D-RO", "02W-RO", "01M-RO")
+def parse_sample_name(sample_name):
+    """
+    Chuyển đổi chuỗi Sample Name:
+      - Nếu kết thúc bằng D: tháng = số ngày / 30
+      - Nếu kết thúc bằng W: tháng = số tuần / 4.345
+      - Nếu kết thúc bằng M: giữ nguyên số tháng
+    """
+    try:
+        part = sample_name.split('-')[0]
+        num_str = "".join(filter(str.isdigit, part))
+        unit = "".join(filter(str.isalpha, part)).upper()
+        num = float(num_str)
+        if unit == "D":
+            return num / 30.0
+        elif unit == "W":
+            return num / 4.345
+        elif unit == "M":
+            return num
+        else:
+            return None
+    except Exception:
+        return None
+
+if "Sample Name" not in data_filtered.columns:
+    st.error("Không tìm thấy cột 'Sample Name' trong dữ liệu.")
+    st.stop()
+
+data_filtered["Time_Months"] = data_filtered["Sample Name"].apply(parse_sample_name)
+
+# Lọc dữ liệu theo chỉ tiêu đã chọn (cho các biểu đồ Insight)
+insight_data = data_filtered[data_filtered["Test description"].isin(selected_tests_filter)].copy()
+if "Actual result" in insight_data.columns:
+    insight_data["Actual result"] = pd.to_numeric(insight_data["Actual result"], errors="coerce")
+else:
+    st.error("Không tìm thấy cột 'Actual result' trong dữ liệu.")
+    st.stop()
+
+# Tách dữ liệu cho biểu đồ xu hướng dựa trên Test (Cảm quan: CQ..., Hóa lý: HL...)
+sensory_data = data_filtered[data_filtered["Test"].astype(str).str.startswith("CQ")].copy()
+chemical_data = data_filtered[data_filtered["Test"].astype(str).str.startswith("HL")].copy()
+
+for df in [sensory_data, chemical_data]:
+    if "Actual result" in df.columns:
+        df["Actual result"] = pd.to_numeric(df["Actual result"], errors="coerce")
+    else:
+        st.error("Không tìm thấy cột 'Actual result' trong dữ liệu.")
+        st.stop()
+
+sensory_grouped = sensory_data.groupby(["Test description", "Time_Months"], as_index=False).agg({"Actual result": "mean"})
+chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as_index=False).agg({"Actual result": "mean"})
+
+##############################################
+# PHẦN 4: HIỂN THỊ QA DASHBOARD
+##############################################
+
 st.markdown("## QA Dashboard - Phân tích hạn sử dụng")
 
 # Create QA Summary
@@ -218,9 +378,13 @@ if not sensory_grouped.empty:
         st.markdown(f"<div style='padding:10px; background-color:{status_color}20; border-left:5px solid {status_color}; margin-bottom:10px;'><strong style='color:{status_color};'>{status_text}</strong><br>{recommendation}</div>", unsafe_allow_html=True)
     else:
         st.markdown("<div style='padding:10px; background-color:#80808020; border-left:5px solid gray; margin-bottom:10px;'><strong>⚙️ Chưa đủ dữ liệu để đánh giá</strong><br>Cần thêm dữ liệu để dự báo hạn sử dụng chính xác.</div>", unsafe_allow_html=True)
+else:
+    st.info("Không có dữ liệu cảm quan để hiển thị dashboard.")
 
-## 3. Modify the sensory trend chart section
-# Update the sensory visualization with automatic projection (no checkbox needed)
+##############################################
+# PHẦN 5: VẼ BIỂU ĐỒ XU HƯỚNG CẢM QUAN
+##############################################
+
 st.markdown("## Biểu đồ xu hướng cảm quan")
 
 # Biểu đồ xu hướng cảm quan (Line Chart) với ngưỡng giới hạn
@@ -357,12 +521,65 @@ if not sensory_grouped.empty:
     
     projection_df = pd.DataFrame(projection_data)
     st.dataframe(projection_df, use_container_width=True, hide_index=True)
+else:
+    st.info("Không có dữ liệu cảm quan để hiển thị biểu đồ.")
 
-## 4. Improve the chemical section with threshold comparison (if applicable)
-# This is optional if chemical parameters have thresholds too
+##############################################
+# PHẦN 6: VẼ BIỂU ĐỒ XU HƯỚNG HÓA LÝ
+##############################################
 
-## 5. Replace histogram with a more valuable rate of change analysis
-# Add this instead of the histogram
+# Biểu đồ xu hướng hóa lý (Line Chart)
+if not chemical_grouped.empty:
+    st.markdown("## Biểu đồ xu hướng hóa lý")
+    
+    fig_chemical = px.line(
+        chemical_grouped,
+        x="Time_Months",
+        y="Actual result",
+        color="Test description",
+        markers=True,
+        template="plotly_white",
+        title="Xu hướng HÓA LÝ theo thời gian lưu"
+    )
+    
+    # Cấu hình layout dựa trên chế độ hiển thị
+    if display_mode == "Professional":
+        fig_chemical.update_layout(
+            xaxis_title="Thời gian (tháng)",
+            yaxis_title="Giá trị hóa lý",
+            legend_title="Chỉ tiêu hóa lý",
+            hovermode="x unified",
+            font=dict(family="Arial", size=12),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=40, r=40, t=80, b=40),
+            plot_bgcolor="white",
+            title=dict(font=dict(size=20, color="#333333"), x=0.5, xanchor="center")
+        )
+    elif display_mode == "Compact":
+        fig_chemical.update_layout(
+            xaxis_title="Tháng",
+            yaxis_title="Giá trị",
+            showlegend=False,
+            hovermode="closest",
+            margin=dict(l=20, r=20, t=40, b=20),
+            height=300
+        )
+    else:  # Standard
+        fig_chemical.update_layout(
+            xaxis_title="Thời gian (tháng)",
+            yaxis_title="Kết quả Actual",
+            legend_title="Chỉ tiêu",
+            hovermode="x unified"
+        )
+    
+    st.plotly_chart(fig_chemical, use_container_width=True)
+else:
+    st.info("Không có dữ liệu hóa lý để hiển thị biểu đồ.")
+
+##############################################
+# PHẦN 7: PHÂN TÍCH CHUYÊN SÂU
+##############################################
+
 st.markdown("## Phân tích chuyên sâu")
 
 # Add tabs for different analyses
@@ -493,9 +710,11 @@ with tab2:
     else:
         st.info("Không đủ dữ liệu để vẽ Box Plot.")
 
-## 6. Remove or simplify the remaining plots
-# Keep only the most useful visualizations from the remaining plots
-# For example, you might want to keep only the scatter plot with trendline
+##############################################
+# PHẦN 8: PHÂN TÍCH HỒI QUY
+##############################################
+
+# Biểu đồ Scatter plot với trendline
 if not insight_data.empty and "Time_Months" in insight_data.columns:
     st.markdown("### Mối quan hệ giữa thời gian lưu và kết quả kiểm")
     # Use scatter with trendline - one of the most valuable charts for shelf-life analysis
@@ -530,8 +749,6 @@ if not insight_data.empty and "Time_Months" in insight_data.columns:
     if "Test description" in insight_data.columns:
         st.markdown("#### Phương trình hồi quy tuyến tính")
         
-        import statsmodels.api as sm
-        
         for test in insight_data["Test description"].unique():
             test_data = insight_data[insight_data["Test description"] == test].dropna(subset=["Time_Months", "Actual result"])
             
@@ -558,5 +775,5 @@ if not insight_data.empty and "Time_Months" in insight_data.columns:
                     - R² = {r_squared:.2f}
                     - Dự báo đạt ngưỡng: {projection_text}
                     """)
-                except:
+                except Exception:
                     st.markdown(f"**{test}**: Không đủ dữ liệu để phân tích hồi quy")
