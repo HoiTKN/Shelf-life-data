@@ -67,11 +67,8 @@ threshold_value = st.sidebar.slider(
 )
 
 # Thêm tùy chọn chế độ hiển thị
-display_mode = st.sidebar.radio(
-    "Chế độ hiển thị:",
-    options=["Standard", "Professional", "Compact"],
-    index=0
-)
+# And replace with this simple constant:
+display_mode = "Standard" 
 
 # Load dữ liệu từ Google Sheet
 data = load_data()
@@ -310,97 +307,188 @@ chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as
 ##############################################
 # PHẦN 4: HIỂN THỊ QA DASHBOARD
 ##############################################
+ef create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
+    
+    st.markdown("## Báo cáo Shelf-Life MMB")
+    
+    if not sensory_grouped.empty:
+        # Create status indicator based on shelf life projection
+        if isinstance(qa_summary['min_shelf_life'], (int, float)):
+            current_month = max(sensory_grouped["Time_Months"])
+            remaining_months = qa_summary['min_shelf_life'] - current_month
+            
+            if remaining_months <= 1:
+                status_emoji = "🔴"
+                status_text = "Cảnh báo"
+                status_color = "#ffebee"  # light red
+                status_border = "#f44336"  # red
+                status_detail = f"Sản phẩm dự kiến đạt ngưỡng trong {remaining_months:.1f} tháng"
+            elif remaining_months <= 3:
+                status_emoji = "🟠"
+                status_text = "Cần chú ý"
+                status_color = "#fff8e1"  # light amber
+                status_border = "#ffa000"  # amber
+                status_detail = f"Cần theo dõi sát trong {remaining_months:.1f} tháng tới"
+            else:
+                status_emoji = "🟢"
+                status_text = "Ổn định"
+                status_color = "#e8f5e9"  # light green
+                status_border = "#4caf50"  # green
+                status_detail = f"Chất lượng dự báo ổn định trong {remaining_months:.1f} tháng tới"
+        else:
+            status_emoji = "⚪"
+            status_text = "Chưa xác định"
+            status_color = "#f5f5f5"  # light grey
+            status_border = "#9e9e9e"  # grey
+            status_detail = "Không đủ dữ liệu để đánh giá"
+        
+        # Main status card
+        st.markdown(f"""
+        <div style="padding:15px; background-color:{status_color}; border-left:5px solid {status_border}; 
+                    margin-bottom:20px; border-radius:4px;">
+            <div style="display:flex; align-items:center;">
+                <span style="font-size:2rem; margin-right:10px;">{status_emoji}</span>
+                <div>
+                    <div style="font-size:1.2rem; font-weight:bold; margin-bottom:5px;">
+                        Trạng thái: {status_text}
+                    </div>
+                    <div>{status_detail}</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Key metrics
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if isinstance(qa_summary['min_shelf_life'], (int, float)):
+                value_display = f"{qa_summary['min_shelf_life']:.1f} tháng"
+                st.markdown(f"""
+                <div style="border:1px solid #e0e0e0; border-radius:5px; padding:10px; text-align:center;">
+                    <div style="color:#666; font-size:0.9rem;">Dự kiến hạn sử dụng</div>
+                    <div style="font-size:1.8rem; font-weight:bold; margin:5px 0;">{value_display}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style="border:1px solid #e0e0e0; border-radius:5px; padding:10px; text-align:center;">
+                    <div style="color:#666; font-size:0.9rem;">Dự kiến hạn sử dụng</div>
+                    <div style="font-size:1.5rem; font-weight:bold; margin:5px 0;">Chưa xác định</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        with col2:
+            if qa_summary['closest_attr']:
+                current_val = qa_summary['closest_attr_value']
+                distance = threshold_value - current_val
+                progress_pct = min(100, max(0, (current_val / threshold_value) * 100))
+                
+                display_name = qa_summary['closest_attr']
+                # Trim if too long
+                if len(display_name) > 20:
+                    display_name = display_name[:18] + "..."
+                
+                st.markdown(f"""
+                <div style="border:1px solid #e0e0e0; border-radius:5px; padding:10px; text-align:center;">
+                    <div style="color:#666; font-size:0.9rem;">Chỉ tiêu gần ngưỡng nhất</div>
+                    <div style="font-size:1.5rem; font-weight:bold; margin:5px 0;">{display_name}</div>
+                    <div style="margin:10px 0;">
+                        <div style="background-color:#e0e0e0; height:5px; border-radius:5px; width:100%;">
+                            <div style="background-color:{status_border}; height:5px; border-radius:5px; width:{progress_pct}%;"></div>
+                        </div>
+                    </div>
+                    <div style="font-size:0.9rem;">Còn cách ngưỡng {distance:.2f} đơn vị</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style="border:1px solid #e0e0e0; border-radius:5px; padding:10px; text-align:center;">
+                    <div style="color:#666; font-size:0.9rem;">Chỉ tiêu gần ngưỡng nhất</div>
+                    <div style="font-size:1.5rem; font-weight:bold; margin:5px 0;">Chưa xác định</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        with col3:
+            if qa_summary['fastest_attr']:
+                change_rate = qa_summary['change_rates'][qa_summary['fastest_attr']]
+                display_name = qa_summary['fastest_attr']
+                # Trim if too long
+                if len(display_name) > 20:
+                    display_name = display_name[:18] + "..."
+                
+                arrow = "↑" if change_rate > 0 else "↓"
+                color = "#f44336" if change_rate > 0 else "#4caf50"  # Red for increasing (bad), green for decreasing (good)
+                
+                st.markdown(f"""
+                <div style="border:1px solid #e0e0e0; border-radius:5px; padding:10px; text-align:center;">
+                    <div style="color:#666; font-size:0.9rem;">Chỉ tiêu biến đổi nhanh nhất</div>
+                    <div style="font-size:1.5rem; font-weight:bold; margin:5px 0;">{display_name}</div>
+                    <div style="color:{color}; font-size:1.2rem;">{arrow} {abs(change_rate):.2f}/tháng</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style="border:1px solid #e0e0e0; border-radius:5px; padding:10px; text-align:center;">
+                    <div style="color:#666; font-size:0.9rem;">Chỉ tiêu biến đổi nhanh nhất</div>
+                    <div style="font-size:1.5rem; font-weight:bold; margin:5px 0;">Chưa xác định</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Key recommendations
+        st.markdown("### Khuyến nghị hành động")
+        
+        if isinstance(qa_summary['min_shelf_life'], (int, float)):
+            # Determine recommendations based on status
+            recs = []
+            if remaining_months <= 1:
+                recs.append(f"• Đề xuất giảm hạn sử dụng xuống **{int(qa_summary['min_shelf_life'])} tháng**")
+                recs.append("• Đánh giá khẩn cấp chất lượng sản phẩm hiện tại")
+                recs.append(f"• Tập trung cải thiện chỉ tiêu **{qa_summary['closest_attr']}**")
+            elif remaining_months <= 3:
+                recs.append(f"• Cân nhắc hạn sử dụng **{int(qa_summary['min_shelf_life'])} tháng**")
+                recs.append("• Tăng tần suất giám sát chất lượng")
+                
+                if qa_summary['fastest_attr']:
+                    fastest_rate = qa_summary['change_rates'][qa_summary['fastest_attr']]
+                    if fastest_rate > 0:  # Only if it's getting worse
+                        recs.append(f"• Khảo sát nguyên nhân biến đổi nhanh của **{qa_summary['fastest_attr']}**")
+            else:
+                recs.append("• Duy trì quy trình hiện tại")
+                recs.append(f"• Tiếp tục theo dõi định kỳ các chỉ tiêu")
+            
+            rec_html = "<div style='background-color:#f5f5f5; padding:15px; border-radius:5px;'>"
+            for rec in recs:
+                rec_html += f"<div style='margin-bottom:8px;'>{rec}</div>"
+            rec_html += "</div>"
+            
+            st.markdown(rec_html, unsafe_allow_html=True)
+        else:
+            st.info("Chưa đủ dữ liệu để đưa ra khuyến nghị. Cần bổ sung thêm dữ liệu theo thời gian.")
+    else:
+        st.info("Không có dữ liệu cảm quan để hiển thị dashboard.")
 
-st.markdown("## QA Dashboard - Phân tích hạn sử dụng")
-
-# Create QA Summary
+# Then use it in your main code like this, replacing the current QA dashboard section:
 if not sensory_grouped.empty:
     qa_summary = generate_qa_summary(sensory_grouped, threshold_value)
-    
-    # Create metrics in three columns
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if isinstance(qa_summary['min_shelf_life'], (int, float)):
-            st.metric(
-                "Dự kiến hạn sử dụng", 
-                f"{qa_summary['min_shelf_life']:.1f} tháng",
-                help="Thời gian dự kiến khi chỉ tiêu đầu tiên đạt ngưỡng giới hạn"
-            )
-        else:
-            st.metric("Dự kiến hạn sử dụng", qa_summary['min_shelf_life'])
-    
-    with col2:
-        if qa_summary['closest_attr']:
-            current_val = qa_summary['closest_attr_value']
-            distance = threshold_value - current_val
-            st.metric(
-                "Chỉ tiêu gần ngưỡng nhất", 
-                qa_summary['closest_attr'],
-                f"Còn cách {distance:.2f} đơn vị",
-                help="Chỉ tiêu đang gần đạt ngưỡng giới hạn nhất"
-            )
-        else:
-            st.metric("Chỉ tiêu gần ngưỡng nhất", "Không xác định")
-    
-    with col3:
-        if qa_summary['fastest_attr']:
-            change_rate = qa_summary['change_rates'][qa_summary['fastest_attr']]
-            st.metric(
-                "Chỉ tiêu biến đổi nhanh nhất", 
-                qa_summary['fastest_attr'],
-                f"{change_rate:.2f}/tháng",
-                help="Chỉ tiêu có tốc độ thay đổi nhanh nhất theo thời gian"
-            )
-        else:
-            st.metric("Chỉ tiêu biến đổi nhanh nhất", "Không xác định")
-    
-    # Create a visual status indicator
-    st.markdown("### Trạng thái sản phẩm")
-    
-    # Determine status based on proximity to threshold
-    if isinstance(qa_summary['min_shelf_life'], (int, float)):
-        remaining_months = qa_summary['min_shelf_life'] - max(sensory_grouped["Time_Months"])
-        
-        if remaining_months <= 1:
-            status_color = "red"
-            status_text = "⚠️ Cảnh báo: Sản phẩm gần đạt ngưỡng giới hạn"
-            recommendation = "Đề xuất đánh giá chất lượng khẩn cấp và xem xét giảm hạn sử dụng."
-        elif remaining_months <= 3:
-            status_color = "orange"
-            status_text = "⚠️ Chú ý: Cần theo dõi chặt chẽ"
-            recommendation = "Đề xuất tăng tần suất giám sát và cải thiện quy trình sản xuất."
-        else:
-            status_color = "green"
-            status_text = "✅ Ổn định: Chất lượng sản phẩm trong giới hạn cho phép"
-            recommendation = "Duy trì tần suất giám sát hiện tại."
-            
-        st.markdown(f"<div style='padding:10px; background-color:{status_color}20; border-left:5px solid {status_color}; margin-bottom:10px;'><strong style='color:{status_color};'>{status_text}</strong><br>{recommendation}</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div style='padding:10px; background-color:#80808020; border-left:5px solid gray; margin-bottom:10px;'><strong>⚙️ Chưa đủ dữ liệu để đánh giá</strong><br>Cần thêm dữ liệu để dự báo hạn sử dụng chính xác.</div>", unsafe_allow_html=True)
+    create_improved_dashboard(sensory_grouped, threshold_value, qa_summary)
 else:
     st.info("Không có dữ liệu cảm quan để hiển thị dashboard.")
 
-##############################################
-# PHẦN 5: VẼ BIỂU ĐỒ XU HƯỚNG CẢM QUAN
-##############################################
+### 3. Simplify the main trend chart section
+# Replace the current chart section with a cleaner version:
 
-st.markdown("## Biểu đồ xu hướng cảm quan")
-
-# Biểu đồ xu hướng cảm quan (Line Chart) với ngưỡng giới hạn
-if not sensory_grouped.empty:
-    # Use projections from QA summary
-    projections = qa_summary['projections']
+def create_cleaner_trend_chart(sensory_grouped, threshold_value, projections):
+    """Create a cleaner and more informative trend chart"""
     
-    # Create the sensory trend chart
+    # Create the trend chart with annotations
     fig_sensory = px.line(
         sensory_grouped,
         x="Time_Months",
         y="Actual result",
         color="Test description",
         markers=True,
-        template="plotly_white",
-        title="Xu hướng CẢM QUAN theo thời gian lưu"
+        template="plotly_white"
     )
     
     # Add threshold line
@@ -427,7 +515,7 @@ if not sensory_grouped.empty:
             font=dict(color="red", size=12),
         )
     
-    # Add projection lines automatically
+    # Add projection lines
     for test, proj_month in projections.items():
         if isinstance(proj_month, (int, float)):
             # Get the last point for this attribute
@@ -461,183 +549,154 @@ if not sensory_grouped.empty:
                             size=10,
                             color=line_color,
                         ),
-                        name=f"{test} (dự báo tháng {proj_month})",
+                        name=f"{test} (tháng {proj_month})",
                         showlegend=True
                     )
                 )
+                
+                # Add more descriptive annotation for important points
+                if proj_month < last_month + 4:  # Only for attributes close to threshold
+                    fig_sensory.add_annotation(
+                        x=proj_month,
+                        y=threshold_value + 0.2,
+                        text=f"{test}: dự báo tháng {proj_month}",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowcolor=line_color,
+                        font=dict(color=line_color, size=10),
+                    )
     
-    # Apply selected display mode
-    if display_mode == "Professional":
-        fig_sensory.update_layout(
-            xaxis_title="Thời gian (tháng)",
-            yaxis_title="Giá trị cảm quan",
-            legend_title="Chỉ tiêu cảm quan",
-            hovermode="x unified",
-            font=dict(family="Arial", size=12),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(l=40, r=40, t=80, b=40),
-            plot_bgcolor="white",
-            title=dict(font=dict(size=20, color="#333333"), x=0.5, xanchor="center")
-        )
-    elif display_mode == "Compact":
-        fig_sensory.update_layout(
-            xaxis_title="Tháng",
-            yaxis_title="Giá trị",
-            showlegend=False,
-            hovermode="closest",
-            margin=dict(l=20, r=20, t=40, b=20),
-            height=300
-        )
-    else:  # Standard
-        fig_sensory.update_layout(
-            xaxis_title="Thời gian (tháng)",
-            yaxis_title="Kết quả Actual",
-            legend_title="Chỉ tiêu",
-            hovermode="x unified"
-        )
+    # Clean up the layout
+    fig_sensory.update_layout(
+        title="Xu hướng cảm quan theo thời gian lưu",
+        xaxis_title="Thời gian (tháng)",
+        yaxis_title="Giá trị cảm quan",
+        legend_title="Chỉ tiêu",
+        hovermode="x unified",
+        margin=dict(l=30, r=30, t=50, b=30),
+    )
     
-    # Display chart
+    return fig_sensory
+
+# Use it in your main code:
+st.markdown("## Biểu đồ xu hướng cảm quan")
+
+if not sensory_grouped.empty:
+    # Create and display the trend chart
+    fig_sensory = create_cleaner_trend_chart(sensory_grouped, threshold_value, qa_summary['projections'])
     st.plotly_chart(fig_sensory, use_container_width=True)
     
-    # Display projection table with enhanced QA insights
-    st.markdown("### Dự báo và phân tích chỉ tiêu")
+    # Create a more useful table with key trends and projections
+    st.markdown("### Dự báo thời hạn sử dụng")
     
-    # Create a table with more detailed QA metrics
+    # Group by priority (closest to threshold first)
     projection_data = []
-    for test, value in projections.items():
+    for test, value in qa_summary['projections'].items():
         latest_data = sensory_grouped[sensory_grouped["Test description"] == test].sort_values("Time_Months").iloc[-1]
         current_value = latest_data['Actual result']
+        distance = threshold_value - current_value if current_value < threshold_value else 0
+        
+        # Get change rate
         change_rate = qa_summary['change_rates'].get(test, "N/A")
         if isinstance(change_rate, (int, float)):
-            change_rate = f"{change_rate:.2f}/tháng"
+            change_text = f"{change_rate:.2f}/tháng"
+            months_to_threshold = distance / change_rate if change_rate > 0 else float('inf')
+        else:
+            change_text = "N/A"
+            months_to_threshold = float('inf')
+            
+        # Calculate a priority score (lower = higher priority)
+        if isinstance(value, (int, float)):
+            priority = value
+        else:
+            priority = float('inf')
             
         projection_data.append({
             "Chỉ tiêu": test,
-            "Giá trị hiện tại": f"{current_value:.2f}",
-            "Còn cách ngưỡng": f"{threshold_value - current_value:.2f}" if current_value < threshold_value else "Đã vượt",
-            "Tốc độ thay đổi": change_rate,
-            "Dự báo tháng đạt ngưỡng": value
+            "Giá trị hiện tại": current_value,
+            "Khoảng cách": distance,
+            "Tốc độ thay đổi": change_text,
+            "Ước tính đạt ngưỡng": value,
+            "priority": priority
         })
     
-    projection_df = pd.DataFrame(projection_data)
-    st.dataframe(projection_df, use_container_width=True, hide_index=True)
+    if projection_data:
+        # Sort by priority
+        projection_data.sort(key=lambda x: x["priority"])
+        
+        # Create DataFrame without the priority column
+        df_display = pd.DataFrame(projection_data)
+        if 'priority' in df_display.columns:
+            df_display = df_display.drop('priority', axis=1)
+            
+        # Format the numeric columns
+        for col in ["Giá trị hiện tại", "Khoảng cách"]:
+            if col in df_display.columns:
+                df_display[col] = df_display[col].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
+                
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("Không đủ dữ liệu để dự báo thời hạn sử dụng.")
 else:
     st.info("Không có dữ liệu cảm quan để hiển thị biểu đồ.")
 
-##############################################
-# PHẦN 6: VẼ BIỂU ĐỒ XU HƯỚNG HÓA LÝ
-##############################################
+### 4. Simplify the analysis tabs - Combine into one clear section
+# Replace the current tabs with a more focused analysis:
 
-# Biểu đồ xu hướng hóa lý (Line Chart)
-if not chemical_grouped.empty:
-    st.markdown("## Biểu đồ xu hướng hóa lý")
+st.markdown("## Đánh giá của QA Manager")
+
+if not sensory_grouped.empty and len(qa_summary['change_rates']) > 0:
+    # Create one clear column layout
+    col1, col2 = st.columns([2, 1])
     
-    fig_chemical = px.line(
-        chemical_grouped,
-        x="Time_Months",
-        y="Actual result",
-        color="Test description",
-        markers=True,
-        template="plotly_white",
-        title="Xu hướng HÓA LÝ theo thời gian lưu"
-    )
-    
-    # Cấu hình layout dựa trên chế độ hiển thị
-    if display_mode == "Professional":
-        fig_chemical.update_layout(
-            xaxis_title="Thời gian (tháng)",
-            yaxis_title="Giá trị hóa lý",
-            legend_title="Chỉ tiêu hóa lý",
-            hovermode="x unified",
-            font=dict(family="Arial", size=12),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(l=40, r=40, t=80, b=40),
-            plot_bgcolor="white",
-            title=dict(font=dict(size=20, color="#333333"), x=0.5, xanchor="center")
-        )
-    elif display_mode == "Compact":
-        fig_chemical.update_layout(
-            xaxis_title="Tháng",
-            yaxis_title="Giá trị",
-            showlegend=False,
-            hovermode="closest",
-            margin=dict(l=20, r=20, t=40, b=20),
-            height=300
-        )
-    else:  # Standard
-        fig_chemical.update_layout(
-            xaxis_title="Thời gian (tháng)",
-            yaxis_title="Kết quả Actual",
-            legend_title="Chỉ tiêu",
-            hovermode="x unified"
-        )
-    
-    st.plotly_chart(fig_chemical, use_container_width=True)
-else:
-    st.info("Không có dữ liệu hóa lý để hiển thị biểu đồ.")
-
-##############################################
-# PHẦN 7: PHÂN TÍCH CHUYÊN SÂU
-##############################################
-
-st.markdown("## Phân tích chuyên sâu")
-
-# Add tabs for different analyses
-tab1, tab2 = st.tabs(["📈 Tốc độ biến đổi", "📊 Box Plot"])
-
-with tab1:
-    # Rate of change analysis
-    if not sensory_grouped.empty and len(qa_summary['change_rates']) > 0:
-        # Create DataFrame from change rates
+    with col1:
+        # Create rate of change chart
         change_df = pd.DataFrame([
             {"Chỉ tiêu": test, "Tốc độ thay đổi": rate}
             for test, rate in qa_summary['change_rates'].items()
         ])
         
-        # Sort by change rate (fastest first)
-        change_df = change_df.sort_values("Tốc độ thay đổi", ascending=False)
-        
-        # Create horizontal bar chart
-        fig_change = px.bar(
-            change_df,
-            y="Chỉ tiêu",
-            x="Tốc độ thay đổi",
-            orientation="h",
-            title="Tốc độ thay đổi của các chỉ tiêu (đơn vị/tháng)",
-            template="plotly_white",
-            text_auto='.2f'
-        )
-        
-        # Add a vertical reference line at 0
-        fig_change.add_vline(
-            x=0, 
-            line_width=1, 
-            line_dash="dash", 
-            line_color="gray",
-            annotation_text="Không thay đổi",
-            annotation_position="top"
-        )
-        
-        # Color bars based on value (positive = red, negative = green)
-        fig_change.update_traces(
-            marker_color=[
-                'red' if x > 0 else 'green' for x in change_df["Tốc độ thay đổi"]
-            ],
-            opacity=0.7
-        )
-        
-        fig_change.update_layout(
-            xaxis_title="Tốc độ thay đổi (đơn vị/tháng)",
-            yaxis_title="",
-            height=400
-        )
-        
-        # Display chart
-        st.plotly_chart(fig_change, use_container_width=True)
-        
-        # Add QA analysis
-        st.markdown("### Phân tích dành cho QA Manager")
-        
+        if not change_df.empty:
+            # Sort by change rate (fastest first)
+            change_df = change_df.sort_values("Tốc độ thay đổi", ascending=False)
+            
+            # Create horizontal bar chart
+            fig_change = px.bar(
+                change_df,
+                y="Chỉ tiêu",
+                x="Tốc độ thay đổi",
+                orientation="h",
+                title="Tốc độ thay đổi của các chỉ tiêu (đơn vị/tháng)",
+                template="plotly_white",
+                text_auto='.2f'
+            )
+            
+            # Add a vertical reference line at 0
+            fig_change.add_vline(
+                x=0, 
+                line_width=1, 
+                line_dash="dash", 
+                line_color="gray",
+            )
+            
+            # Color bars based on value (positive = red, negative = green)
+            fig_change.update_traces(
+                marker_color=[
+                    'red' if x > 0 else 'green' for x in change_df["Tốc độ thay đổi"]
+                ],
+                opacity=0.7
+            )
+            
+            fig_change.update_layout(
+                xaxis_title="Tốc độ thay đổi (đơn vị/tháng)",
+                yaxis_title="",
+                height=350
+            )
+            
+            # Display chart
+            st.plotly_chart(fig_change, use_container_width=True)
+    
+    with col2:
         # Determine which attributes are changing significantly
         significant_change = 0.1  # Threshold for significant change
         improving = [attr for attr, rate in qa_summary['change_rates'].items() if rate < -significant_change]
@@ -646,110 +705,113 @@ with tab1:
                  if abs(rate) <= significant_change]
         
         # Create insights
-        col1, col2 = st.columns(2)
+        st.markdown("### Đánh giá xu hướng")
         
-        with col1:
-            st.markdown("#### Đánh giá tốc độ biến đổi")
-            if worsening:
-                st.markdown(f"⚠️ **Chỉ tiêu đang xấu đi:**")
-                for attr in worsening:
-                    rate = qa_summary['change_rates'][attr]
-                    st.markdown(f"- {attr}: +{rate:.2f}/tháng")
+        # Add icons
+        if worsening:
+            st.markdown("""
+            <div style="background-color:#ffebee; padding:10px; border-radius:5px; margin-bottom:10px;">
+                <div style="font-weight:bold; color:#d32f2f;">⚠️ Chỉ tiêu đang xấu đi:</div>
+            """, unsafe_allow_html=True)
             
-            if improving:
-                st.markdown(f"✅ **Chỉ tiêu đang cải thiện:**")
-                for attr in improving:
-                    rate = qa_summary['change_rates'][attr]
-                    st.markdown(f"- {attr}: {rate:.2f}/tháng")
-            
-            if stable:
-                st.markdown(f"ℹ️ **Chỉ tiêu ổn định:**")
-                for attr in stable:
-                    st.markdown(f"- {attr}")
+            for attr in worsening:
+                rate = qa_summary['change_rates'][attr]
+                st.markdown(f"• **{attr}**: +{rate:.2f}/tháng")
+                
+            st.markdown("</div>", unsafe_allow_html=True)
         
-        with col2:
-            st.markdown("#### Khuyến nghị hành động")
+        if improving:
+            st.markdown("""
+            <div style="background-color:#e8f5e9; padding:10px; border-radius:5px; margin-bottom:10px;">
+                <div style="font-weight:bold; color:#388e3c;">✅ Chỉ tiêu đang cải thiện:</div>
+            """, unsafe_allow_html=True)
             
-            if worsening:
-                worst_attr = max([(attr, rate) for attr, rate in qa_summary['change_rates'].items() 
-                                 if attr in worsening], key=lambda x: x[1])
+            for attr in improving:
+                rate = qa_summary['change_rates'][attr]
+                st.markdown(f"• **{attr}**: {rate:.2f}/tháng")
                 
-                st.markdown(f"""
-                - Ưu tiên cải thiện: **{worst_attr[0]}** (biến đổi nhanh nhất)
-                - Tăng tần suất giám sát cho các chỉ tiêu đang xấu đi
-                - Xem xét điều chỉnh quy trình sản xuất/bảo quản
-                """)
-            else:
-                st.markdown("- Duy trì quy trình hiện tại, các chỉ tiêu đang ổn định hoặc cải thiện")
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        if stable:
+            st.markdown("""
+            <div style="background-color:#e3f2fd; padding:10px; border-radius:5px; margin-bottom:10px;">
+                <div style="font-weight:bold; color:#1976d2;">ℹ️ Chỉ tiêu ổn định:</div>
+            """, unsafe_allow_html=True)
             
-            # Add projection-based recommendation
-            if isinstance(qa_summary['min_shelf_life'], (int, float)):
-                current_max_month = max(sensory_grouped["Time_Months"])
-                remaining = qa_summary['min_shelf_life'] - current_max_month
+            for attr in stable:
+                st.markdown(f"• **{attr}**")
                 
-                if remaining < 2:
-                    st.markdown(f"- Xem xét giảm hạn sử dụng xuống **{int(qa_summary['min_shelf_life'])} tháng**")
-                elif remaining < 4:
-                    st.markdown(f"- Cân nhắc thời hạn sử dụng **{int(qa_summary['min_shelf_life'])} tháng**")
-    else:
-        st.info("Cần ít nhất 3 điểm dữ liệu cho mỗi chỉ tiêu để phân tích tốc độ biến đổi.")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-with tab2:
-    # Box Plot (kept from original)
-    if not insight_data.empty:
-        fig_box = px.box(
-            insight_data,
+### 5. Add a concise regression analysis section
+# Keep only the most useful analysis from statsmodels
+
+st.markdown("## Phân tích hồi quy")
+
+if not insight_data.empty and "Time_Months" in insight_data.columns:
+    # Create a more focused and informative regression analysis
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Scatter plot with trendline - just for most critical attributes
+        critical_attrs = []
+        if qa_summary['closest_attr']:
+            critical_attrs.append(qa_summary['closest_attr'])
+        if qa_summary['fastest_attr'] and qa_summary['fastest_attr'] not in critical_attrs:
+            critical_attrs.append(qa_summary['fastest_attr'])
+            
+        # If we have no critical attributes, use all
+        if not critical_attrs and 'Test description' in insight_data.columns:
+            critical_attrs = insight_data['Test description'].unique().tolist()
+            
+        # If we have too many, limit to top 3
+        if len(critical_attrs) > 3:
+            critical_attrs = critical_attrs[:3]
+            
+        # Filter data for critical attributes
+        if critical_attrs and 'Test description' in insight_data.columns:
+            critical_data = insight_data[insight_data['Test description'].isin(critical_attrs)]
+        else:
+            critical_data = insight_data
+            
+        # Create scatter plot with trendline
+        fig_scatter = px.scatter(
+            critical_data,
             x="Time_Months",
             y="Actual result",
             color="Test description",
             template="plotly_white",
-            title="Phân bố kết quả kiểm theo tháng lưu"
+            trendline="ols",
+            title="Phân tích hồi quy cho chỉ tiêu chính"
         )
-        fig_box.update_layout(xaxis_title="Thời gian (tháng)", yaxis_title="Kết quả Actual")
-        st.plotly_chart(fig_box, use_container_width=True)
-    else:
-        st.info("Không đủ dữ liệu để vẽ Box Plot.")
-
-##############################################
-# PHẦN 8: PHÂN TÍCH HỒI QUY
-##############################################
-
-# Biểu đồ Scatter plot với trendline
-if not insight_data.empty and "Time_Months" in insight_data.columns:
-    st.markdown("### Mối quan hệ giữa thời gian lưu và kết quả kiểm")
-    # Use scatter with trendline - one of the most valuable charts for shelf-life analysis
-    fig_scatter = px.scatter(
-        insight_data,
-        x="Time_Months",
-        y="Actual result",
-        color="Test description",
-        template="plotly_white",
-        trendline="ols"
-    )
-    
-    # Add threshold line
-    fig_scatter.add_shape(
-        type="line",
-        x0=insight_data["Time_Months"].min(),
-        x1=insight_data["Time_Months"].max() * 1.2,
-        y0=threshold_value,
-        y1=threshold_value,
-        line=dict(color="red", width=2, dash="dash"),
-    )
-    
-    fig_scatter.update_layout(
-        xaxis_title="Thời gian (tháng)", 
-        yaxis_title="Kết quả Actual",
-        height=500
-    )
-    
-    st.plotly_chart(fig_scatter, use_container_width=True)
-    
-    # Add trendline equation interpretation
-    if "Test description" in insight_data.columns:
-        st.markdown("#### Phương trình hồi quy tuyến tính")
         
-        for test in insight_data["Test description"].unique():
+        # Add threshold line
+        fig_scatter.add_shape(
+            type="line",
+            x0=critical_data["Time_Months"].min(),
+            x1=critical_data["Time_Months"].max() * 1.2,
+            y0=threshold_value,
+            y1=threshold_value,
+            line=dict(color="red", width=2, dash="dash"),
+        )
+        
+        fig_scatter.update_layout(
+            xaxis_title="Thời gian (tháng)", 
+            yaxis_title="Kết quả Actual",
+            height=400
+        )
+        
+        st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    with col2:
+        # Add a more concise equation interpretation
+        st.markdown("### Phương trình dự báo")
+        
+        import statsmodels.api as sm
+        
+        equations = []
+        
+        for test in critical_attrs:
             test_data = insight_data[insight_data["Test description"] == test].dropna(subset=["Time_Months", "Actual result"])
             
             if len(test_data) >= 3:  # Need at least 3 points for meaningful regression
@@ -766,14 +828,50 @@ if not insight_data.empty and "Time_Months" in insight_data.columns:
                     if slope > 0:
                         projected_month = (threshold_value - intercept) / slope
                         projection_text = f"{projected_month:.1f} tháng"
+                        
+                        equations.append({
+                            "test": test,
+                            "intercept": intercept,
+                            "slope": slope,
+                            "r_squared": r_squared,
+                            "projected_month": projected_month
+                        })
                     else:
-                        projection_text = "Không xác định (xu hướng đi ngang hoặc giảm)"
-                    
-                    st.markdown(f"""
-                    **{test}**: 
-                    - Phương trình: y = {intercept:.2f} + {slope:.2f}x
-                    - R² = {r_squared:.2f}
-                    - Dự báo đạt ngưỡng: {projection_text}
-                    """)
-                except Exception:
-                    st.markdown(f"**{test}**: Không đủ dữ liệu để phân tích hồi quy")
+                        equations.append({
+                            "test": test,
+                            "intercept": intercept,
+                            "slope": slope,
+                            "r_squared": r_squared,
+                            "projected_month": None
+                        })
+                except:
+                    pass
+        
+        # Display equations in a nice format
+        for eq in equations:
+            slope_sign = "+" if eq["slope"] > 0 else ""
+            
+            quality = ""
+            if eq["r_squared"] >= 0.9:
+                quality = "🔵 Dự báo đáng tin cậy cao"
+            elif eq["r_squared"] >= 0.7:
+                quality = "🟢 Dự báo đáng tin cậy"
+            elif eq["r_squared"] >= 0.5:
+                quality = "🟠 Dự báo tin cậy trung bình"
+            else:
+                quality = "🔴 Dự báo độ tin cậy thấp"
+                
+            st.markdown(f"""
+            **{eq['test']}**:
+            - y = {eq['intercept']:.2f} {slope_sign}{eq['slope']:.2f}x
+            - R² = {eq['r_squared']:.2f} ({quality})
+            """)
+            
+            if eq["projected_month"] is not None:
+                st.markdown(f"- Dự báo đạt ngưỡng: **{eq['projected_month']:.1f} tháng**")
+            else:
+                st.markdown("- Không thể dự báo (xu hướng đi ngang hoặc giảm)")
+                
+            st.markdown("---")
+else:
+    st.info("Không đủ dữ liệu để phân tích hồi quy.")
