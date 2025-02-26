@@ -69,9 +69,7 @@ threshold_value = st.sidebar.slider(
 # Thêm tùy chọn chế độ hiển thị
 display_mode = st.sidebar.radio(
     "Chế độ hiển thị:",
-    options=["Standard", "Professional", "Compact"],
-    index=0
-)
+    options=["Standard"]
 
 # Load dữ liệu từ Google Sheet
 data = load_data()
@@ -636,7 +634,7 @@ with tab1:
         st.plotly_chart(fig_change, use_container_width=True)
         
         # Add QA analysis
-        st.markdown("### Phân tích dành cho QA Manager")
+        st.markdown("### Phân tích xu hướng chất lượng chung")
         
         # Determine which attributes are changing significantly
         significant_change = 0.1  # Threshold for significant change
