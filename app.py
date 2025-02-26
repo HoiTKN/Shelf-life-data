@@ -1,5 +1,60 @@
-# Modifications for app.py to create a more focused QA dashboard
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from gspread_dataframe import get_as_dataframe
+import numpy as np
 
+##############################################
+# PHẦN 1: LOAD DỮ LIỆU TỪ GOOGLE SHEET
+##############################################
+
+@st.cache_data(show_spinner=False)
+def load_data():
+    """
+    Load dữ liệu từ Google Sheet sử dụng thông tin trong st.secrets.
+    Yêu cầu có key [gcp_service_account] và [sheet] trong secrets.
+    """
+    scope = [
+        "https://spreadsheets.google.com/feeds", 
+        "https://www.googleapis.com/auth/drive"
+    ]
+    try:
+        creds_dict = st.secrets["gcp_service_account"]
+    except KeyError:
+        st.error(
+            "Thiếu key 'gcp_service_account' trong st.secrets. "
+            "Vui lòng thêm nó vào file .streamlit/secrets.toml hoặc trong cài đặt app trên Streamlit Cloud."
+        )
+        return pd.DataFrame()
+    
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(credentials)
+    
+    try:
+        sheet_url = st.secrets["sheet"]["url"]
+    except KeyError:
+        st.error("Thiếu key 'sheet' trong st.secrets. Vui lòng thêm nó.")
+        return pd.DataFrame()
+    
+    spreadsheet = client.open_by_url(sheet_url)
+    worksheet = spreadsheet.get_worksheet(0)
+    df = get_as_dataframe(worksheet, evaluate_formulas=True, header=0)
+    df = df.dropna(how="all")
+    return df
+
+# Load dữ liệu từ Google Sheet
+data = load_data()
+if data.empty:
+    st.stop()
+
+##############################################
+# PHẦN 2: TẠO BỘ LỌC TRÊN SIDEBAR
+##############################################
+
+st.sidebar.header("Bộ lọc dữ liệu")
 ## 1. Modify the sidebar configuration section 
 # Replace the current configuration section with this (remove the checkbox option)
 st.sidebar.markdown("---")
