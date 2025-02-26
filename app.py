@@ -307,7 +307,7 @@ chemical_grouped = chemical_data.groupby(["Test description", "Time_Months"], as
 ##############################################
 # PHẦN 4: HIỂN THỊ QA DASHBOARD
 ##############################################
-ef create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
+def create_improved_dashboard(sensory_grouped, threshold_value, qa_summary):
     
     st.markdown("## Báo cáo Shelf-Life MMB")
     
